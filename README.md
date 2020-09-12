@@ -72,8 +72,7 @@ Configuration is handled with the `cryptoreport.json` file.
 {
   "CoinMarketCap": {
   "API_Key": "Your API Key",
-  "Type": "Data",
-  "Rewards": false
+  "Type": "Data"
   }
 }
 ```
