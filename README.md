@@ -1,6 +1,6 @@
 # Cryptoreport
 
-A BASH script to generate reports on your crypto currency holdings.
+A BASH script to track and report on your crypto currency holdings.
 
 ## Supported Exchanges
 
