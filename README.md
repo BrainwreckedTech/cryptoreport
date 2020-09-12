@@ -137,7 +137,7 @@ Once you have stored your configuration in `cryptoreport.json` you can start usi
   Convert values between currencies.
 
 - `cryptoreport rewards <time_range>`  
-  Report on rewards earned during `<time_range>`, which can be one of `today`, `yesterday`, `day-before`, `this-month`, `last-month`, `this-year`, `last-year`, or a specific data in `YYYY-MM-DD` format.
+  Report on rewards earned during `<time_range>`, which can be one of `today`, `yesterday`, `day-before`, `this-month`, `last-month`, `this-year`, `last-year`, or a specific date in `YYYY-MM-DD` format.
 
 - `cryptoreport test-api <exchange> <endpoint> [query_string]`
   Have fun poking around the APIs yourself.
