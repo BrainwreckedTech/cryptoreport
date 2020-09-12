@@ -1,0 +1,1069 @@
+#!/bin/bash
+
+TTY="/dev/$(ps $$ | tail -1 | awk '{print $2}')"
+[ -t 1 ] && STD="stdout" || STD="stdin"
+
+[[ :on:true:yes:1: =~ :${DEBUG,,}: ]] && DEBUGGER=true || DEBUGGER=false
+
+declare -A BUSPAIRS
+
+ BUSPAIRS['USD']=':ADA:ALGO:ATOM:BAT:BCH:BNB:BTC:BUSD:DASH:ENJ:ETC:ETH:HBAR:ICX:IOTA:LINK:LTC:NANO:NEO:ONT:QTUM:RVN:USDT:VET:WAVES:XLM:XRP:XTZ:ZEC:ZIL:ZRX:'
+BUSPAIRS['USDT']='ADA:ALGO:ATOM:BAT:BCH:BNB:BTC:DOGE:ETC:ETH:LTC:NEO:ONT:QTUM:VET:XLM:XRP:ZRX:'
+ BUSPAIRS['BTC']=':BCH:BNB:ETH:LTC:XRP:'
+
+BTC_VALU=
+BTC_XCHG=
+
+OTP_XCHS=( 'Uphold' )
+OTPASSWD=
+
+function show_help {
+cat <<EndOfHelp
+${0} commands:
+
+add        Add a manual transaction to a manually-tracked account.
+value      Calculates the value of all of your holdings.
+convert    Converts values between cryptocurrencies and fiat.
+import     Imports a CSV file from an exchange.
+rewards    Gathers staking reward info from relevant exchanges.
+spending   Calculates the gross fiat balance you've put into crypto.
+test-api   Test an api call.
+update     Collects your coin balances from all exchanges.
+
+Use ${0} <command> help to see more information on how to use each command.
+EndOfHelp
+}
+
+function convert_time {
+  ${DEBUGGER} && printf 'Called convert_time %s...\n' "$(printf "'%s' " "${@}" | xargs)" >&2
+  # Convert English dynamic day references to an actual date range.
+
+  local reladate="${1}"
+  local year month daynum
+
+  IFS='-' read -r year month daynum <<< "$(date -I)"
+
+  case "${reladate}" in
+    [0-2][0-9][0-9][0-9]-[01][0-9]-[0-3][0-9])
+      DATE_BGN=$(date -d "${reladate} 00:00:00.000" +%s%3N)
+      DATE_END=$(date -d "${reladate} 23:59:59.999" +%s%3N)
+      ;;
+    last-month)
+      DATE_BGN=$(date -d "${year}-${month}-01 -1 month" +%s%3N)
+      DATE_END=$(date -d "${year}-${month}-01 -0.001 seconds" +%s%3N)
+      ;;
+    last-year)
+      DATE_BGN=$(date -d "${year}-01-01 -1 year" +%s%3N)
+      DATE_END=$(date -d "${year}-01-01 -0.001 seconds" +%s%3N)
+      ;;
+    this-month)
+      DATE_BGN=$(date -d "${year}-${month}-01" +%s%3N)
+      DATE_END=$(date -d "${year}-${month}-01 +1 month -0.001 seconds" +%s%3N)
+      ;;
+    this-year)
+      DATE_BGN=$(date -d "${year}-01-01" +%s%3N)
+      DATE_END=$(date -d "${year}-01-01 +1 year -0.001 seconds" +%s%3N)
+      ;;
+    today)
+      DATE_BGN=$(date -d "${year}-${month}-${daynum}" +%s%3N)
+      DATE_END=$(date -d "${year}-${month}-${daynum} +1 day -0.001 seconds" +%s%3N)
+      ;;
+    yesterday)
+      DATE_BGN=$(date -d "${year}-${month}-${daynum} -1 day" +%s%3N)
+      DATE_END=$(date -d "${year}-${month}-${daynum} -0.001 seconds" +%s%3N)
+      ;;
+    day-before)
+      DATE_BGN=$(date -d "${year}-${month}-${daynum} -2 days" +%s%3N)
+      DATE_END=$(date -d "${year}-${month}-${daynum} -1 day -0.001 seconds" +%s%3N)
+      ;;
+  esac
+  ${DEBUGGER} && printf 'Called convert_time set DATE_BGN=%i and DATE_END=%i\n' "${DATE_BGN}" "${DATE_END}"
+}
+
+function format_fiat {
+  # printf 'Called format_fiat %s...' "$(printf "'%s' " "${@}" | xargs -0)" >&2
+  # Returns a specially-formatted floating point number that
+  # superscripts two places after the hundredth place.
+  # Eg: 12.3456 becomes 12.34⁵⁶
+
+  # Of note is that we must handle spacing ourself as bash printf %[n][f] chokes on Unicode
+
+  local spaces="${1}"
+  local float="${2}"
+  
+  # Only do this fancy-pants stuff with extra fiat decimal places if
+  # we're on a virtual console.  Otherwise, a physical console isn't
+  # going to be able to display the high-range Unicode.
+  [[ ${STD}:${TTY} == stdout:/dev/pts/* ]] && local super=( ⁰ ¹ ² ³ ⁴ ⁵ ⁶ ⁷ ⁸ ⁹ ) || local super=( 0 1 2 3 4 5 6 7 8 9 ) 
+
+  local fiatval="$(printf '%.4f' ${float})"
+  local tenths=${fiatval: -2: -1}
+  local hundredths=${fiatval: -1}
+  echo "$(printf "%$(( ${spaces} - ${#fiatval} ))s")${fiatval:0: -2}${super[${tenths}]}${super[${hundredths}]}"
+}
+
+function get_api_uri {
+  ${DEBUGGER} && printf 'Called get_api_uri %s...\n' "$(printf "'%s' " "${@}" | xargs)" >&2
+  # Returns the base API URI for each exchange/wallet
+
+  local exchange="${1}"
+  local retvalue
+
+  case "${exchange,,}" in
+         binance) retvalue="https://api.binance.com";;
+      binance_us) retvalue="https://api.binance.us";;
+        coinbase) retvalue="https://api.coinbase.com";;
+    coinbase_pro) retvalue="https://api.pro.coinbase.com";;
+         kraken*) retvalue="https://api.kraken.com";;
+         kucoin*) retvalue="https://api.kucoin.com";;
+  esac
+
+  printf '%s' "${retvalue}"
+  ${DEBUGGER} && printf 'Called get_api_uri returning %s\n' "${retvalue}" >&2
+}
+
+function fix_currency_names {
+  ${DEBUGGER} && printf 'Called fix_currency_names %s...\n' "$(printf "'%s' " "${@}" | xargs)" >&2
+  # Returns the proper name of a currency when exchanges go off and invent
+  # their own.
+
+  local origtext="${1}"
+
+  fixedtxt="${origtext//MCDAI/DAI}"     # Celsius
+  fixedtxt="${fixedtxt//DOT\.S/DOT}"    # Kraken Staking.
+  fixedtxt="${fixedtxt//XXBT/BTC}"      # Kraken
+  fixedtxt="${fixedtxt//XETH/ETH}"      # Kraken
+  fixedtxt="${fixedtxt//XXLM/XLM}"      # Kraken
+
+  printf '%s' "${fixedtxt}"
+  ${DEBUGGER} && printf 'Called fix_currency_names returning %s\n' "${fixedtxt}" >&2
+}
+
+function get_api_time {
+  ${DEBUGGER} && printf 'Called get_api_time %s...\n' "$(printf "'%s' " "${@}" | xargs)" >&2
+  # Returns the UNIX epoch for right now in the format each exchange/wallet
+  # expects.  Coinbase wants the epoch as a number of seconds.  Binance and
+  # KuCoin want the epoch as a number of milliseconds.
+
+  local exchange="${1}"
+  local retvalue
+
+  case "${exchange,,}" in
+    binance*|kraken*|kucoin*) retvalue="$(date +%s%3N)";;
+                   coinbase*) retvalue="$(date +%s)";;
+  esac
+
+  printf '%s' "${retvalue}"
+  ${DEBUGGER} && printf 'Called get_api_time returning %s\n' "${retvalue}" >&2
+}
+
+function get_accounts {
+  ${DEBUGGER} && printf 'Called get_accounts %s...\n' "$(printf "'%s' " "${@}" | xargs)" >&2
+  # Returns a list of accounts
+
+  local exchange="${1}"
+  
+  local api_uri="$(get_api_uri "${exchange}")"
+  local endpoint="$(get_endpoint "${exchange}" accounts)"
+
+  local retvalue="$(gather_response "${exchange}" "${api_uri}" "${endpoint}" '')"
+
+  printf '%s' "${retvalue}"
+  ${DEBUGGER} && printf 'Called get_accounts returning %s\n' "${retvalue}" >&2
+}
+
+function get_asset_value {
+  ${DEBUGGER} && printf 'Called get_asset_value %s...\n' "$(printf "'%s' " "${@}" | xargs -0)" >&2
+  # Returns the value of 1 cryptocurrency coin
+  # Binance (not US) focuses on BTC being the "universal token"
+  # Binance US is a mixed bag, hence the seperate function to get a market pairing
+  # Coinbase focuses on USD being the "universal token" on the exhange
+  # KuCoin has a direct call to get the USD Fiat price of its coins
+
+  local exchange="${1}"
+  local currency="${2}"
+  local btcvalue=1
+
+  local api_uri btcvalue header mrktpair retvalue
+
+  [ "${exchange,,}" = "binance" ] && mrktpair='BTC'
+  [ "${exchange,,}" = "binance" ] && [ "${currency}" = "BTC" ] && mrktpair='USDT'
+  [ "${exchange,,}" = "binance_us" ] && mrktpair="$(get_bus_market_pair "${currency}")"
+  [ "${mrktpair}" = "BTC" ] && btcvalue="$(get_btc_value "${exchange}")"
+
+  case "${exchange,,}" in
+         binance) jq_data='.price'                       ; api_uri="https://api.binance.com/api/v3/ticker/price?symbol=${currency}${mrktpair}" ;;
+      binance_us) jq_data='.price'                       ; api_uri="https://api.binance.us/api/v3/ticker/price?symbol=${currency}${mrktpair}"  ;; 
+        coinbase) jq_data='.data.amount'                 ; api_uri="https://api.coinbase.com/v2/prices/${currency}-USD/buy"                    ; header='CB-VERSION: 2019-05-07';;
+    coinbase_pro) jq_data='.last'                        ; api_uri="https://api.pro.coinbase.com/products/${currency}-USD/stats"               ;;
+         kraken*) jq_data=".result.${currency^^}USD.b[0]"; api_uri="https://api.kraken.com/0/public/Ticker?pair=${currency^^}USD"              ;;
+         kucoin*) jq_data=".data.${currency}"            ; api_uri="https://api.kucoin.com/api/v1/prices?currencies=${currency}"               ;;
+  esac
+
+  retvalue="$(awk "BEGIN {print ${btcvalue} * $(curl -sH "${header}" "${api_uri}" | jq "${jq_data}" | tr -d '"')}")"
+
+  # This makes sure that what we got back is indeed a number.
+  # Otherwise, assume an error occured and fall back to CoinMarketCap
+  if ! grep -qE '^\-*[0-9]+\.*[0-9]*$' <<< "${retvalue}"; then
+    retvalue="$(get_cmc_value "${currency}")"
+  elif [ "$(awk "BEGIN {print 0 < ${retvalue}}")" -eq "0" ]; then
+    retvalue="$(get_cmc_value "${currency}")"
+  fi
+
+  printf '%.8f' "${retvalue}"
+  ${DEBUGGER} && printf 'Called get_asset_value returning %.8f\n' "${retvalue}" >&2
+}
+
+function get_bus_market_pair {
+  ${DEBUGGER} && printf 'Called get_bus_market_pair %s...\n' "$(printf "'%s' " "${@}" | xargs -0)" >&2
+
+  local currency="${1}"
+
+  if [[ ${BUSPAIRS['USD']} = *:${currency}:* ]]; then
+    retvalue='USD'
+  elif [[ ${BUSPAIRS['USDT']} = *:${currency}:* ]]; then
+    retvalue='USDT'
+  elif [[ ${BUSPAIRS['BTC']} = *:${currency}:* ]]; then
+    retvalue='BTC'
+  fi
+
+  printf '%s' "${retvalue}"
+  ${DEBUGGER} && printf 'Called get_bus_market_pair returning %s\n' "${retvalue}" >&2
+}
+
+function get_btc_value {
+  ${DEBUGGER} && printf 'Called get_btc_value %s...\n' "$(printf "'%s' " "${@}" | xargs -0)" >&2
+  # Returns the value of 1 BTC
+
+  local exchange="${1}"
+  local api_uri jq_data retvalue
+
+  # Have we already stored a BTC value?
+  if [ "${BTC_XCHG}" != "${exchange}" ]; then
+    # Not for this exchange, we haven't.  Get the value and store it.
+    case "${exchange,,}" in
+         binance) jq_data='.price';    api_uri='https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT';;
+      binance_us) jq_data='.price';    api_uri='https://api.binance.us/api/v3/ticker/price?symbol=BTCUSD';;
+         kucoin*) jq_data='.data.buy'; api_uri='https://api.kucoin.com/api/v1/market/stats?symbol=BTC-USDT';;
+    esac
+    BTC_VALU="$(curl -s "${api_uri}" | jq "${jq_data}"  | tr -d '"')"
+    BTC_XCHG="${exchange}"
+  fi
+
+  printf '%s' "${BTC_VALU}"
+  ${DEBUGGER} && printf 'Called get_btc_value returning %s\n' "${BTC_VALU}" >&2
+}
+
+function get_cmc_value {
+  ${DEBUGGER} && printf 'Called get_cmc_value %s...\n' "$(printf "'%s' " "${@}" | xargs -0)" >&2
+  # Returns the value of a coin from CoinMarketCap
+  # This is used when the chosen exchange has no value for a coin.
+
+  local currency="${1^^}"
+  local api_key="$(get_config '.CoinMarketCap.API_Key')"
+  local api_uri="https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
+  local retvalue="$(curl -sH "X-CMC_PRO_API_KEY: ${api_key}" -H "Accept: application/json" -d "symbol=${currency}" -G "${api_uri}" | jq ".data.${currency}.quote.USD.price" | tr -d '"')"
+  [ "${retvalue}" == "null" ] && retvalue=-1
+
+  printf '%.8f' "${retvalue}"
+  ${DEBUGGER} && printf 'Called get_cmc_value returning %s\n' "${retvalue}" >&2
+}
+
+function get_endpoint {
+  ${DEBUGGER} && printf 'Called get_endpoint %s...\n' "$(printf "'%s' " "${@}" | xargs)" >&2
+  # Returns the endpoint for a specified action
+
+  local exchange="${1}"
+  local action="${2}"
+
+  local retvalue
+
+  case "${action}" in
+    accounts)
+      case "${exchange,,}" in
+          binance*) retvalue="/api/v3/account";;
+          coinbase) retvalue="/v2/accounts";;
+      coinbase_pro) retvalue="/accounts";;
+           kraken*) retvalue="/0/private/Balance";;
+           kucoin*) retvalue="/api/v1/accounts";;
+      esac
+      ;;
+    ledger)
+      case "${exchange,,}" in
+          binance*) retvalue="/sapi/v1/asset/assetDividend";;
+          coinbase) retvalue="/v2/accounts/:::acct-id:::/transactions";;
+      coinbase_pro) retvalue="/accounts/:::acct-id:::/ledger";;
+           kucoin*) retvalue="/api/v1/accounts/:::acct-id:::/ledgers";;
+      esac
+      ;;
+  esac
+
+  printf '%s' "${retvalue}"
+  ${DEBUGGER} && printf 'Called get_endpoint returning %s\n' "${retvalue}" >&2
+}
+
+function get_hmac_sign {
+  ${DEBUGGER} && printf 'Called get_hmac_sign %s...\n' "$(printf "'%s' " "${@}" | xargs -0)" >&2
+  # Returns the HMAC signature required for private endpoints.
+
+  local exchange="${1}"
+  local endpoint="${2}"
+  local querystr="${3}"
+  local api_scrt="${4}"
+  local timestamp="${5}"
+  
+  local hmac_key prestring retvalue substring
+
+  # Make sure query_str isn't set at all if not using it.
+  [ -z "${querystr}" ] && unset querystr
+
+  case "${exchange,,}" in
+    binance*) prestring="${querystr}${querystr+&}timestamp=${timestamp}";;
+    coinbase) prestring="${timestamp}GET${endpoint}?limit=100${querystr+&}${querystr}";;
+     kraken*)
+        substring="${timestamp}nonce=${timestamp}"
+        ${DEBUGGER} && printf 'Substring is %s...\n' "${substring}" >&2
+        sha256hex="$(printf '%s' "${substring}" | sha256sum | tr -d ' -')"
+        ${DEBUGGER} && printf 'Substring sha256 hash (hexadecimal representation) is %s\n' "${sha256hex}" >&2
+        prestring="$(printf '%s' "${endpoint}" | xxd -p | tr -d '\n')${sha256hex}"
+      ;;
+     kucoin*) prestring="${timestamp}GET${endpoint}?pageSize=100${querystr+&}${querystr}";;
+           *) prestring="${timestamp}GET${endpoint}${querystr+?}${querystr}";;
+  esac
+
+  ${DEBUGGER} && printf 'HMAC Prestring is...\n%s\n' "$(printf '%s' "${prestring}" | xxd -r -p | xxd)" >&2
+
+  case "${exchange,,}" in 
+    coinbase_pro|kraken*) hmac_key="$(base64 -d <<< "${api_scrt}" | xxd -p | tr -d '\n')";;
+                       *) hmac_key="${api_scrt}";;
+  esac
+
+  case "${exchange,,}" in
+      binance*|coinbase) retvalue="$(printf "%s" "${prestring}" | openssl dgst -sha256 -mac HMAC -macopt key:${hmac_key} | sed 's/.*= //g')";;
+                kraken*) retvalue="$(printf "%s" "${prestring}" | xxd -r -p | openssl dgst -sha512 -mac HMAC -macopt hexkey:${hmac_key} -binary | base64 -w0)";;
+           coinbase_pro) retvalue="$(printf "%s" "${prestring}" | openssl dgst -sha256 -mac HMAC -macopt hexkey:${hmac_key} -binary | base64)";;
+                kucoin*) retvalue="$(printf "%s" "${prestring}" | openssl dgst -sha256 -mac HMAC -macopt key:${hmac_key} -binary | base64)";;
+  esac
+
+  printf '%s' "${retvalue}"
+  ${DEBUGGER} && printf 'Called get_hmac_sign returning %s\n' "${retvalue}" >&2
+}
+
+function get_response {
+  ${DEBUGGER} && printf 'Called get_response %s...\n' "$(printf "'%s' " "${@}" | xargs -0)" >&2
+  # Returns the data from an API call
+
+  local exchange="${1}"
+  local api_uri="${2}"
+  local endpoint="${3}"
+  local querystr="${4}"
+
+  local retvalue
+
+  local api_key="$(get_config ".${exchange}.API_Key")"
+  local api_pass="$(get_config ".${exchange}.API_Password")"
+  local api_scrt="$(get_config ".${exchange}.API_Secret")"
+
+  local timestamp="$(get_api_time "${exchange}")"
+  local signature=$(get_hmac_sign "${exchange}" "${endpoint}" "${querystr}" "${api_scrt}" "${timestamp}")
+
+  # Make sure query_str isn't set at all if not using it.
+  [ -z "${querystr}" ] && unset querystr
+
+  ${DEBUGGER} && set -x
+  case "${exchange,,}" in
+        binance*) retvalue="$(curl -sH "X-MBX-APIKEY:${api_key}" "${api_uri}${endpoint}?${querystr}${querystr+&}timestamp=${timestamp}&signature=${signature}")";;
+        coinbase) retvalue="$(curl -sH "CB-ACCESS-KEY:${api_key}" -H "CB-ACCESS-TIMESTAMP:${timestamp}" -H "CB-ACCESS-SIGN:${signature}" -H "CB-VERSION:2019-05-07"            "${api_uri}${endpoint}?limit=100${querystr+&}${querystr}")";;
+    coinbase_pro) retvalue="$(curl -sH "CB-ACCESS-KEY:${api_key}" -H "CB-ACCESS-TIMESTAMP:${timestamp}" -H "CB-ACCESS-SIGN:${signature}" -H "CB-ACCESS-PASSPHRASE:${api_pass}" "${api_uri}${endpoint}${querystr+?}${querystr}")";;
+         kraken*) retvalue="$(curl -sH "API-Key: ${api_key}"      -H "User-Agent: Cryptoreport"         -H "API-Sign: ${signature}" -d "nonce=${timestamp}${querystr+&}${querystr}" "${api_uri}${endpoint}")";;
+         kucoin*) retvalue="$(curl -sH "KC-API-KEY:${api_key}"    -H "KC-API-TIMESTAMP:${timestamp}"    -H "KC-API-SIGN:${signature}"    -H "KC-API-PASSPHRASE:${api_pass}"    "${api_uri}${endpoint}?pageSize=100${querystr+&}${querystr}")";;
+  esac
+  ${DEBUGGER} && set +x
+
+  printf '%s' "${retvalue}"
+  ${DEBUGGER} && printf 'Called get_response returning %s\n' "${retvalue}" >&2
+}
+
+function gather_response {
+  ${DEBUGGER} && printf 'Called gather_response %s...\n' "$(printf "'%s' " "${@}" | xargs -0)" >&2
+  # Returns the data from an API call
+
+  local exchange="${1}"
+  local api_uri="${2}"
+  local endpoint="${3}"
+  local querystr="${4}"
+
+  local retvalue
+  local jsondata
+  
+  # Make sure query_str isn't set at all if not using it.
+  [ -z "${querystr}" ] && unset querystr
+
+  jsondata=$(get_response "${exchange}" "${api_uri}" "${endpoint}" "${querystr}")
+  totalpgs=0
+
+  case ${jsondata} in
+    *totalPage*)
+      totalpgs="$(sed 's/.*"totalPage":\([0-9]\+\).*/\1/g' <<< "${jsondata}")"
+      totalnum="$(sed 's/.*"totalNum":\([0-9]\+\).*/\1/g' <<< "${jsondata}")"
+      ;;
+  esac
+
+  if [ "${totalpgs}" -gt 1 ]; then
+    merge_data="$(jq '.data.items[]' <<< "${jsondata}" | tr -d ' ' | tr -d '\n')"
+    for ((lcv=2; lcv<=${totalpgs}; lcv++)); do
+      new_qstr="${querystr}${querystr+&}currentPage=${lcv}"
+      retvalue=$(get_response "${exchange}" "${api_uri}" "${endpoint}" "${new_qstr}")
+      merge_data+="$(jq '.data.items[]' <<< "${retvalue}" | tr -d ' ' | tr -d '\n')"
+    done
+    retvalue='{"code":"200000","data":{"currentPage":'${totalpgs}',"pageSize":100,"totalNum":'${totalnum}',"totalPage":'${totalpgs}',"items":['"${merge_data}"']}}'
+    retvalue="$(sed 's/}{/},{/g' <<< "${retvalue}")"
+  else
+    retvalue="${jsondata}"
+  fi
+
+  printf '%s' "${retvalue}"
+  ${DEBUGGER} && printf 'Called gather_response returning %s\n' "${retvalue}" >&2
+}
+
+function parse_json {
+  ${DEBUGGER} && printf 'Called parse_json %s...\n' "$(printf "'%s' " "${@}" | xargs -0)" >&2
+  # Returns a list of accounts with DATATYPE
+
+  local exchange="${1}"
+  local datatype="${2}"
+  local jsondata="${3}"
+  local rev_sort
+  local sort_col
+  local retvalue
+
+  case "${datatype}" in
+    acct_bal)
+      case "${exchange,,}" in
+            binance*) jq_array='.balances[]'           ; jq_select='select((.free|tonumber)>0)'                                 ; jq_return='[.asset,         .free,           (now|rint)                   ]';;
+            coinbase) jq_array='.data[]'               ; jq_select='select((.balance.amount|tonumber)>0 and .created_at!=null)' ; jq_return='[.currency.code, .balance.amount, (.updated_at|fromdateiso8601)]';;
+        coinbase_pro) jq_array='.[]'                   ; jq_select='select((.balance|tonumber)>0)'                              ; jq_return='[.currency,      .balance,        (now|rint)                   ]';;
+        kraken_stake) jq_array='.result | to_entries[]'; jq_select='select(.key | contains(".S"))'                              ; jq_return='[.key,           .value,          (now|rint)                   ]';;
+        kraken_trade) jq_array='.result | to_entries[]'; jq_select='select(.key | contains(".S") | not)'                        ; jq_return='[.key,           .value,          (now|rint)                   ]';;
+         kucoin_main) jq_array='.data[]'               ; jq_select='select((.balance|tonumber)>0 and .type=="main")'            ; jq_return='[.currency,      .balance,        (now|rint)                   ]';;
+         kucoin_pool) jq_array='.data[]'               ; jq_select='select((.balance|tonumber)>0 and .type=="pool")'            ; jq_return='[.currency,      .balance,        (now|rint)                   ]';;
+         kucoin_lock) jq_array='.data[]'               ; jq_select='select((.balance|tonumber)>0 and .type=="pool")'            ; jq_return='[.currency,      .balance,        (now|rint)                   ]';;
+      esac
+      ;;
+    acct_ids)
+      case "${exchange,,}" in
+            binance*) jq_array='.balances[]'; jq_select=''                         ; jq_return='[.asset,         .id, (now|rint)]';;
+            coinbase) jq_array='.data[]'    ; jq_select='select(.created_at!=null)'; jq_return='[.currency.code, .id, (.updated_at|fromdateiso8601)]';;
+        coinbase_pro) jq_array='.[]'        ; jq_select=''                         ; jq_return='[.currency,      .id, (now|rint)]';;
+         kucoin_main) jq_array='.data[]'    ; jq_select='select(.type=="main")'    ; jq_return='[.currency,      .id, (now|rint)]';;
+         kucoin_pool) jq_array='.data[]'    ; jq_select='select(.type=="pool")'    ; jq_return='[.currency,      .id, (now|rint)]';;
+         kucoin_lock) jq_array='.data[]'    ; jq_select='select(.type=="pool")'    ; jq_return='[.currency,      .id, (now|rint)]';;
+      esac
+      ;;
+    acct_lgr|ledger)
+      case "${exchange,,}" in
+          binance*) jq_array='.rows[]'      ; jq_return='[.asset, .amount, ((.divTime / 1000)|rint)]';;
+       kucoin_lock) jq_array='.data.items[]'; jq_return='[.currency, (if .bizType=="Staking" then .amount else ("-"+.amount) end), ((.createdAt / 1000)|rint), .direction]' ; jq_select='select(.bizType=="Staking" or .bizType=="Redemption")';;
+      esac
+      ;;
+    rewards)
+      case "${exchange,,}" in
+        kucoin_lock) jq_array='.data.items[]'; jq_return='[.currency, (if .direction=="in" then .amount else ("-"+.amount) end), ((.createdAt / 1000)|rint)]'; jq_select='select(.bizType=="Staking Profits")';;
+        kucoin_main) jq_array='.data.items[]'; jq_return='[.currency, (if .direction=="in" then .amount else ("-"+.amount) end), ((.createdAt / 1000)|rint)]'; jq_select='select(.bizType=="Rewards")';;
+        kucoin_pool) jq_array='.data.items[]'; jq_return='[.currency, (if .direction=="in" then .amount else ("-"+.amount) end), ((.createdAt / 1000)|rint)]'; jq_select='select(.bizType=="Soft Staking Profits")';;
+      esac
+      ;;
+    spending)
+      case "${exchange,,}" in
+            coinbase) jq_array='.data[]'; jq_return='[.native_amount.currency, .native_amount.amount, (.updated_at|fromdateiso8601), (.type+" "+.amount.currency)]'; jq_select='select((.type=="buy" and .details.payment_method_name!="Cash (USD)") or ((.type=="fiat_deposit" or .type=="fiat_withdrawal") and .details.payment_method_name!="Cash (USD)") or ((.type=="exchange_deposit" or .type=="pro_withdrawal") and .amount.currency=="USD"))';;
+        coinbase_pro) jq_array='.[]'    ; jq_return='["USD",  .amount, (.created_at[0:19]+"Z"|fromdateiso8601), .details.transfer_type]'                           ; jq_select='select(.type=="transfer")';;
+      esac
+      ;;
+  esac
+  [ "${datatype}" = "balance" ] && rev_sort="r" || unset rev_sort
+  [[ :ledger:rewards: =~ :${datatype}: ]] && sort_col=3 || sort_col=2
+  retvalue="$(jq "${jq_array} | ${jq_select} ${jq_select+|} ${jq_return} | @tsv" <<< "${jsondata}" | sed 's/"//g;s/\\t/\t/g' | sort -t$'\t' -${rev_sort}nk${sort_col} | awk 'NF')"
+  retvalue="$(fix_currency_names "${retvalue}")"
+  printf '%s' "${retvalue}"
+  ${DEBUGGER} && printf 'Called parse_json returning %s\n' "${retvalue}" >&2
+}
+
+function get_config {
+  ${DEBUGGER} && printf 'Called get_config %s...\n' "$(printf "'%s' " "${@}" | xargs)" >&2
+
+  local retvalue="$(jq -M "${1/_????*\./.}" <<< "${APICONFIG}" | tr -d '"')"
+
+  printf '%s' "${retvalue}"
+  ${DEBUGGER} && printf 'Called get_config returning %s\n' "${retvalue}" >&2
+}
+
+function get_csv_account {
+  ${DEBUGGER} && printf 'Called get_csv_account %s...\n' "$(printf "'%s' " "${@}" | xargs)" >&2
+  # Gets data out of a manual CSV account
+
+  local exchange="${1}"
+  local cg_name cg_balance cg_last tsv_ledger
+  local retvalue
+
+  case ${exchange,,} in
+    celsius) tsv_ledger="$(csvawk -d '{OFS="\t"; print $4, $3, $5, $2, $1}' <<< "$(sed 's/, 20/ 20/g' "${0}.celsius.csv")" | tr -d '"' | sed 's/MCDAI/DAI/g;s/withdrawal/deposit/g')";;
+  esac
+
+  tsv_ledger="$(sed 's/\t\t*/\t/g;s/\(airdrop\|bonus_coin\|deposit\|interest\|reward\|trade\)\t//g;s/withdraw\t/-/g'  <<< "${tsv_ledger}")"
+  tsv_ledger=$(awk -F$'\t' '{("date -d \""$3"\" +%s"|getline f3); OFS=FS; print $1, $2, f3, $4}' <<< "${tsv_ledger}")
+
+  for cg_name in $(sort -u <<< "$( cut -f1 <<< "${tsv_ledger}")"); do
+    cg_balance="$(awk '{sum += $2;} END {if (sum<0) sum=0; printf "%.8f", sum;}' <<< "$(grep -P "^${cg_name[${group}]}\t" <<< "${tsv_ledger}")")"
+    cg_last="$(awk 'BEGIN{a=0}{if ($3>0+a) a=$3} END{print a}' <<< "$(grep -P "^${cg_name[${group}]}\t" <<< "${tsv_ledger}")")"
+    printf '%s\t%s\t%s\n' "${cg_name}" "${cg_balance}" "${cg_last}"
+  done
+}
+
+function get_tsv_account {
+  ${DEBUGGER} && printf 'Called get_tsv_account %s...\n' "$(printf "'%s' " "${@}" | xargs)" >&2
+  # Gets data out of a manual TSV account
+
+  local exchange="${1}"
+
+  local cg_name cg_balance cg_last retvalue tsv_ledger
+
+  tsv_ledger="$(sed 's/\t\t*/\t/g;s/\(airdrop\|deposit\|interest\|reward\|trade\)\t//g;s/withdraw\t/-/g' "${0}.${exchange,,}.tsv")"
+  tsv_ledger=$(awk -F$'\t' '{("date -d \""$3"\" +%s"|getline f3); OFS=FS; print $1, $2, f3, $4}' <<< "${tsv_ledger}")
+
+  for cg_name in $(sort -u <<< "$( cut -f1 <<< "${tsv_ledger}")"); do
+    cg_balance="$(awk '{sum += $2;} END {if (sum<0) sum=0; printf "%.8f", sum;}' <<< "$(grep -P "^${cg_name[${group}]}\t" <<< "${tsv_ledger}")")"
+    cg_last="$(awk 'BEGIN{a=0}{if ($3>0+a) a=$3} END{print a}' <<< "$(grep -P "^${cg_name[${group}]}\t" <<< "${tsv_ledger}")")"
+    printf '%s\t%s\t%s\n' "${cg_name}" "${cg_balance}" "${cg_last}"
+  done
+}
+
+function get_values {
+  ${DEBUGGER} && printf 'Called get_values %s...\n' "$(printf "'%s' " "${@}" | xargs -0)" >&2
+  # Adds a fiat values (coin worth and total worth) to LISTINGS
+
+  local tsv_data="${1}"
+
+  while IFS=$'\t' read -r exchange currency balance epoch; do
+    printf "\033[2K\rGetting %s value for %s..." "${exchange}" "${currency}"
+    if [[ ${currency} = *USD* ]]; then
+      curprice=1
+    elif [[ ${currency} == KFEE ]]; then
+      curprice=0.01
+    else
+      market=$(get_config ".${exchange}.Value_Source")
+      [ "${market}" = "null" ] && market="${exchange}"
+      curprice="$(get_asset_value "${market}" "${currency}")"
+    fi
+    coin_val="$(awk "BEGIN { print ${balance} * ${curprice}}")"
+    LISTINGS+="${exchange}"$'\t'"${epoch}"$'\t'"${currency}"$'\t'"${balance}"$'\t'"${curprice}"$'\t'"${coin_val}"$'\n'
+  done <<< "${tsv_data}"
+  printf "\033[2K\r"
+}
+
+function sum_ledger {
+  ${DEBUGGER} && printf 'Called sum_ledger %s...\n' "$(printf "'%s' " "${@}" | xargs -0)" >&2
+  # Get a total of values from a ledger
+  # The ledger is excpected to have the same currency in its list
+
+  local exchange="${1}"
+  local acct_num="${2}"
+  local summary="${3}"
+
+  local api_uri endpoint retvalue signature ledger_json ledger_tsv coin_lst coin_sym coin_ttl
+  
+  ledger_tsv="$(parse_json "${exchange}" "${summary}" "$(get_ledger "${exchange}" "${acct_num}" "${querystr}")")"
+  coin_sym="${ledger_tsv%%$'\t'*}"
+  coin_ttl="$(awk '{ sum += $2; } END { printf "%.8f", sum; }' <<< "${ledger_tsv}")"
+  coin_lst="$(awk 'BEGIN{a=0}{if ($3>0+a) a=$3} END{print a}' <<< "${ledger_tsv}")"
+  [ -n "${coin_sym}" -a "$(awk "BEGIN { print 0 < ${coin_ttl} }")" -eq "1" ] && retvalue=$(printf '%s\t%s\t%s\n' "${coin_sym}" "${coin_ttl}" "${coin_lst}")
+
+  printf '%s' "${retvalue}"
+  ${DEBUGGER} && printf 'Called get_tsv_account returning %s\n' "${retvalue}" >&2
+}
+
+function get_ledger {
+  ${DEBUGGER} && printf 'Called get_ledger %s...\n' "$(printf "'%s' " "${@}" | xargs -0)" >&2
+  # Gets a ledger
+
+  local exchange="${1}"
+  local acct_num="${2}"
+  local querystr="${3}"
+
+  local api_uri endpoint
+
+  if [ -n "${DATE_BGN}" -a -n "${DATE_END}" ]; then
+    [[ ${exchange,,} == kucoin* ]] && querystr+="${querystr+&}startAt=${DATE_BGN}&endAt=${DATE_END}"
+  fi
+
+  api_uri="$(get_api_uri "${exchange}")"
+  endpoint="$(get_endpoint "${exchange}" ledger)"
+  endpoint="${endpoint/:::acct-id:::/${acct_num}}"
+  retvalue="$(gather_response "${exchange}" "${api_uri}" "${endpoint}" "${querystr}" | awk 'NF')"
+
+  printf '%s' "${retvalue}"
+  ${DEBUGGER} && printf 'Called get_ledger returning %s\n' "${retvalue}" >&2
+}
+
+function group_coin_values {
+  ${DEBUGGER} && printf 'Called group_coin_values %s...\n' "$(printf "'%s' " "${@}" | xargs -0)" >&2
+  # Creates global arrays representing total value by coin.
+  # Of note, this retains the different valuation of the same coin across multiple exchanges.
+
+  local tsv_data="${1}"
+  local cg_balance cg_last cg_name cg_value
+  
+  printf "\033[2K\rAggregating Coin Values..."
+
+  for cg_name in $( awk '{print $3}' <<< "${tsv_data}" | sort -u ); do
+    cg_balance="$( awk '{ sum += $4; } END { printf "%.8f", sum; }' <<< "$( grep -P "\t${cg_name}\t" <<< "${tsv_data}" )" )"
+    cg_value="$( awk '{ sum += $6; } END { printf "%.8f", sum; }' <<< "$( grep -P "\t${cg_name}\t" <<< "${tsv_data}" )" )"
+    cg_last="$(awk 'BEGIN{a=0}{if ($2>0+a) a=$2} END{print a}' <<< "$( grep -P "\t${cg_name}\t" <<< "${tsv_data}" )" )"
+    COINLIST+="${cg_name}"$'\t'"${cg_balance}"$'\t'"${cg_value}"$'\t'"${cg_last}"$'\n'
+  done
+
+  printf '\033[2K\r'
+  ${DEBUGGER} && printf 'Created coin groupings:\n%s' "${COINLIST}" >&2
+}
+
+function group_exchange_values {
+  ${DEBUGGER} && printf 'Called group_exchange_values %s...\n' "$(printf "'%s' " "${@}" | xargs -0)" >&2
+  # Creates global arrays representing total value by coin.
+  # Of note, this retains the different valuation of the same coin across multiple exchanges.
+
+  local tsv_data="${1}"
+  local eg_value
+
+  printf "\033[2K\rAggregating Exchange Values..."
+
+  for eg_name in $( awk '{print $1}' <<< "${tsv_data}" | sort -u ); do
+    eg_value="$( awk '{ sum += $6; } END { printf "%.8f", sum; }' <<< "$( grep -P "^${eg_name}\t" <<< "${tsv_data}" )" )"
+    XCHGLIST+="${eg_name}"$'\t'"${eg_value}"$'\n'
+  done
+
+  printf '\033[2K\r'
+  ${DEBUGGER} && printf 'Created exchange groupings:\n%s' "${XCHGLIST}" >&2
+}
+
+function print_header {
+  format_string="\033[2K\r$(row_format)"
+  format_string="${format_string//.?/}"
+  format_string="${format_string//f/s}"
+  printf "${format_string}" "${CHDRS[@]}"
+}
+
+function print_sepline {
+  for ((COLS=0; COLS<${#CWIDS[@]}; COLS++)); do
+    spaces=${CWIDS[${COLS}]//f/s}
+    printf "%${spaces#-}" | tr ' ' '-'; printf ' '
+  done
+  printf '\033[0m\n'
+}
+
+function row_format {
+  for (( LCV=0; LCV<${#CWIDS[@]}; LCV++)); do
+    format_row+="%${CWIDS[${LCV}]} "
+  done
+  echo "${format_row::-1}\033[0m\n"
+}
+
+# Note that KuCoin is split into 3 "virtual" exchanges
+# This is because we have to look for slightly different things based on what we want from KuCoin
+
+APICONFIG=$(<"${0}.json")
+WALLETS=( $( jq -M 'to_entries[]|.key' <<< "${APICONFIG}" | tr -d '"' | sed 's/\(KuCoin\)/\1_Main\n\1_Pool\n\1_Lock/gI' | sed 's/\(Kraken\)/\1_Trade\n\1_Stake/gI' ) )
+
+CRNT=0
+
+case "${1}" in
+  update)
+      if [ "${2,,}" == 'help' ]; then
+      echo "${0} ${1}: Update the coin totals of your portfolion."
+      echo
+      echo "There are no options for this command."
+      echo
+    else
+      for EXCHANGE in "${WALLETS[@]}"; do
+        if [ "$(get_config ".${EXCHANGE}.Type")" != "Data" ]; then
+          if [ "$(get_config ".${EXCHANGE}.TSV_File")" = "true" ]; then
+            printf "\033[2K\rGetting account info from %s..." "${EXCHANGE}"
+            TSV_DATA+="$(awk -F$'\t' '{OFS=FS; print "'${EXCHANGE}'", $1, $2, $3}' <<< "$(get_tsv_account "${EXCHANGE}")")"$'\n'
+          elif [ "$(get_config ".${EXCHANGE}.CSV_File")" = "true" ]; then
+            printf "\033[2K\rGetting account info from %s..." "${EXCHANGE}"
+            TSV_DATA+="$(awk -F$'\t' '{OFS=FS; print "'${EXCHANGE}'", $1, $2, $3}' <<< "$(get_csv_account "${EXCHANGE}")")"$'\n'
+          elif [ "$(get_config ".${EXCHANGE}.API_Key")" != "null" ]; then
+            printf "\033[2K\rGetting account info from %s..." "${EXCHANGE}"
+            if [ "${EXCHANGE,,}" = "kucoin_lock" ]; then
+              while IFS=$'\t' read -r CURRENCY ACCT_NUM TIMESTAMP; do
+                printf "\033[2K\rGetting account info from %s...%s ledger..." "${EXCHANGE}" "${CURRENCY}"
+                NEWSTAKE="$(sum_ledger "${EXCHANGE}" "${ACCT_NUM}" "ledger")"
+                [ -n "${NEWSTAKE}" ] && STAKINGS+="${NEWSTAKE}"$'\n'
+              done <<< "$(parse_json "${EXCHANGE}" "acct_ids" "$(get_accounts "${EXCHANGE}")")"
+              RPLY="$(echo "${STAKINGS}" | awk 'NF')"
+            else
+              RPLY="$(parse_json "${EXCHANGE}" "acct_bal" "$(get_accounts "${EXCHANGE}")")"
+            fi
+            [ -n "${RPLY}" ] && TSV_DATA+="$(awk -F$'\t' '{OFS=FS; print "'${EXCHANGE}'", $1, $2, $3}' <<< "${RPLY}")"$'\n'
+          fi
+        fi
+        (( CRNT++ ))
+      done
+      printf '\n'
+      awk 'NF' <<< "${TSV_DATA}" > "${0}.balances.tsv"
+    fi
+    ;;
+
+  value)
+    if [ "${2,,}" == 'help' ]; then
+      echo "${0} ${1}: List the value of your crypto portfolio."
+      echo
+      echo "${0} ${1} <grouping> [format:csv]"
+      echo
+      echo "<grouping>     One of 'details' 'coins' or 'exchanges'"
+      echo
+      echo "[format:csv]   The currency transacted in"
+      echo
+    else
+      get_values "$(awk 'NF' "${0}.balances.tsv")"
+      LISTINGS=${LISTINGS%$'\n'}
+
+      LCV=0
+      SKIP=0
+      [ "${2}" = "hide-worthless" ] && THRS=0.01 || THRS=0.0000000001
+
+      case "${2}" in
+        details)
+          TSV_DATA="${LISTINGS}"
+          CHDRS=( 'EXCHANGE' 'COIN' 'BALANCE' 'PRICE' 'VALUE' )
+          CWIDS=( '-12s' '-6s' '16.8f' '16.8f' '10b' )
+          GRND_TTL="$(awk '{ sum += $6; } END { printf "%.8f", sum; }' <<< "${LISTINGS}")"
+          ;;
+        coins)
+          group_coin_values "${LISTINGS}"
+          TSV_DATA="$( sort -rnk3 <<< "${COINLIST}" | awk 'NF')"
+          CHDRS=( 'COIN' 'BALANCE' 'VALUE' 'PERCENT' )
+          CWIDS=( '-6s' '16.8f' '10b' '6.2f' )
+          GRND_TTL="$(awk '{ sum += $3; } END { printf "%.8f", sum; }' <<< "${COINLIST}")"
+          ;;
+        exchanges)
+          group_exchange_values "${LISTINGS}"
+          TSV_DATA="$( sort -rnk2 <<< "${XCHGLIST}" | awk 'NF' )"
+          CHDRS=( 'EXCHANGE' 'VALUE' 'PERCENT')
+          CWIDS=( '15s' '10b' '6.2f')
+          GRND_TTL="$(awk '{ sum += $2; } END { printf "%.8f", sum; }' <<< "${XCHGLIST}")"
+          ;;
+      esac
+
+      if [ "${3}" != "format:csv" ]; then
+        print_header
+        printf '\033[92m'
+        print_sepline
+        ROW_FRMT="$(row_format)"
+      fi
+
+      while read -r TSV_LINE; do
+        IFS=$'\t' read -r -a TSV_ROWS <<< "${TSV_LINE}"
+        if [ "${3}" != "format:csv" ]; then
+          (( LCV++ ))
+          [ $(( LCV % 2 )) = 0 ] && printf '\033[92m'
+        fi
+        case "${3}" in
+          'format:csv')
+            case "${2}" in
+                details) printf '%s,%s,%.8f,%.8f,%.4f\n' "${TSV_ROWS[0]}" "${TSV_ROWS[2]}" "${TSV_ROWS[3]}" "${TSV_ROWS[4]}" "${TSV_ROWS[5]}";;
+                  coins) printf '%s,%.8f,%.4f,%.2f\n' "${TSV_ROWS[0]}" "${TSV_ROWS[1]}" "${TSV_ROWS[2]}" "$(awk "BEGIN { print ${TSV_ROWS[2]} / ${GRND_TTL} * 100 }")";;
+              exchanges) printf '%s,%.4f,%.2f\n' "${TSV_ROWS[0]}" "${TSV_ROWS[1]}" "$(awk "BEGIN { print ${TSV_ROWS[1]} / ${GRND_TTL} * 100 }")";;
+            esac
+            ;;
+          *)
+            case "${2}" in
+                details) printf "${ROW_FRMT}" "${TSV_ROWS[0]}" "${TSV_ROWS[2]}" "${TSV_ROWS[3]}" "${TSV_ROWS[4]}" "$(format_fiat 10 "${TSV_ROWS[5]}")";;
+                  coins) printf "${ROW_FRMT}" "${TSV_ROWS[0]}" "${TSV_ROWS[1]}" "$(format_fiat 10 "${TSV_ROWS[2]}")" "$(awk "BEGIN { print ${TSV_ROWS[2]} / ${GRND_TTL} * 100 }")";;
+              exchanges) printf "${ROW_FRMT}" "${TSV_ROWS[0]}" "$(format_fiat 10 "${TSV_ROWS[1]}")" "$( awk "BEGIN { print ${TSV_ROWS[1]} / ${GRND_TTL} * 100 }")";;
+            esac
+            ;;
+        esac
+      done <<< "${TSV_DATA}"
+
+      if [ "${3}" != "format:csv" ]; then 
+        [ $(( (LCV + SKIP) % 2 )) = 1 ] && printf '\033[92m'
+        print_sepline
+        [ $(( (SKIP + LCV) % 2 )) = 0 ] && printf '\033[92m'
+          case "${2}" in
+          details) CWIDS=( '53s' '10b' '1s' );;
+            coins) CWIDS=( '23s' '10b' '6.2f' );;
+        esac
+        printf "$(row_format)" "GRAND TOTAL" "$(format_fiat 10 ${GRND_TTL})" "$([ "${2}" != "details" ] && echo '100')"
+      fi
+    fi
+    ;;
+
+  rewards)
+    if [ "${2,,}" == 'help' ]; then
+      echo "${0} ${1}: List the rewards each exchange has given you."
+      echo
+      echo "${0} ${1} <time_range>"
+      echo
+      echo "<time_range>   One of the following:"
+      echo "               - today        - yesterday    - day-before"
+      echo "               - this-year    - last year"
+      echo "               - this-month   - last month"
+      echo "               - A specific date in the YYYY-MM-DD format"
+      echo
+    else
+      for EXCHANGE in "${WALLETS[@]}"; do
+        unset RWRD
+        if [ "$(get_config ".${EXCHANGE}.Rewards")" == "true" ]; then
+          if [ "$(get_config ".${EXCHANGE}.API_Key")" != "null" ]; then
+            printf "\033[2K\rGetting account info from %s..." "${EXCHANGE}"
+            AURI="$(get_api_uri "${EXCHANGE}")"
+            convert_time "${2}"
+            if [[ ${EXCHANGE,,} == kucoin* ]]; then
+              EPNT="$(get_endpoint "${EXCHANGE}" 'accounts')"
+            elif [[ ${EXCHANGE,,} == binance* ]]; then
+              EPNT="$(get_endpoint "${EXCHANGE}" 'ledger')"
+              QSTR="startTime=${DATE_BGN}&endTime=${DATE_END}"
+            fi
+            RPLY="$(gather_response "${EXCHANGE}" "${AURI}" "${EPNT}" "${QSTR}")"
+            if [[ ${EXCHANGE} == kucoin* ]]; then
+              RPLY="$(parse_json "${EXCHANGE}" "acct_ids" "${RPLY}")"
+              if [ -n "${RPLY}" ]; then
+                while IFS=$'\t' read -r CRYPTO ACCTID TIMESTAMP; do
+                  NEW_RWRD="$(parse_json "${EXCHANGE}" "rewards" "$(get_ledger "${EXCHANGE}" "${ACCTID}")" | awk 'NF')"
+                  [ -n "${NEW_RWRD}" ] && RWRD+="${NEW_RWRD}"$'\n'
+                done <<< "${RPLY}"
+              fi
+            fi
+            [[ ${EXCHANGE,,} == binance* ]] && RWRD="$(parse_json "${EXCHANGE}" "acct_lgr" "${RPLY}")"
+            RWRD="${RWRD%$'\n'}"
+            [ -n "${RWRD}" ] && get_values "$(awk '{OFS="\t"; print "'${EXCHANGE}'", $1, $2, $3}' <<< "${RWRD}")"
+          fi
+        fi
+        (( CRNT++ ))
+      done
+
+      LISTINGS=${LISTINGS%$'\n'}
+
+      CHDRS=( 'DATE' 'EXCHGANGE' 'COIN' 'PRICE' 'REWARD' 'VALUE' )
+      CWIDS=( '-19s' '-12s'      '-6s'  '16.8f'  '16.8f' '10b' )
+
+      print_header
+      printf '\033[92m'
+      print_sepline
+
+      LCV=0
+      FRMT="$(row_format)"
+
+      while IFS=$'\t' read -r EXCHANGE TIMESTMP CURRENCY BALANCE MRKT_PRC TOTALVAL; do
+        (( LCV++ ))
+        [ $(( LCV % 2 )) = 1 ] && printf '\033[92m'
+        printf "${FRMT}" "$(date -u -d@"${TIMESTMP}" +"%Y-%m-%d %H:%M:%S")" "${EXCHANGE}" "${CURRENCY}" "${MRKT_PRC}" "${BALANCE}" "$( format_fiat 10 "${TOTALVAL}" )"
+      done <<< "$(sort -rnk2 <<< "${LISTINGS}")"
+
+      [ $(( LCV % 2 )) =  0 ] && printf '\033[92m'
+      print_sepline
+      group_coin_values "${LISTINGS}"
+
+      CWIDS=( '30s' '-19s' '-6s' '15.8f' '10b' )
+      FRMT="$(row_format)"
+
+      while IFS=$'\t' read -r CURRENCY BALANCE TOTALVAL LASTTRAN; do
+        (( LCV++ ))
+        [ $(( LCV % 2 )) = 0 ] && printf '\033[92m'
+        printf "${FRMT}" "" "$(date -u -d@"${LASTTRAN}" +"%Y-%m-%d %H:%M:%S")" "${CURRENCY}" "${BALANCE}" "$( format_fiat 10 "${TOTALVAL}" )"
+      done <<< "$(sort -rnk4 <<< "${COINLIST}")"
+
+      [ $(( LCV % 2 )) = 1 ] && printf '\033[92m'
+      print_sepline
+      group_exchange_values "${LISTINGS}"
+
+      CWIDS=( '60s' '12s' '10b')
+
+      FRMT="$(row_format)"
+
+      while IFS=$'\t' read -r EXCHANGE TOTALVAL; do
+        (( LCV++ ))
+        [ $(( LCV % 2 )) = 1 ] && printf '\033[92m'
+        printf "${FRMT}" "" "${EXCHANGE}" "$( format_fiat 10 "${TOTALVAL}" )"
+      done <<< "$(sort -rnk2 <<< "${XCHGLIST}")"
+    fi
+    ;;
+
+  import)
+    if [ "${2,,}" == 'help' ]; then
+      echo "${0} ${1}: Bring in a CSV export file from an exchange."
+      echo
+      echo "${0} ${1} <exchange> <url>"
+      echo
+      echo "<exchange>     Name of the exchange"
+      echo
+      echo "<url>          The download link of the CSV file"
+      echo
+    else
+      curl "${3}" -o "${0}.${2,,}.csv"
+    fi
+    ;;
+
+  add)
+    if [ "${2,,}" == 'help' ]; then
+      echo "${0} ${1}: Add a transaction to a manually-tracked account"
+      echo
+      echo "${0} ${1} <exchange> <currency> <trans_type> <amount> <date> <trans_id>"
+      echo
+      echo "<exchange>     Name of the exchange"
+      echo
+      echo "<currency>     The currency transacted in"
+      echo
+      echo "<trans_type>   The type of transaction"
+      echo
+      echo "<amount>       The amount of currency transacted"
+      echo
+      echo "<date>         Human-readable ISO-formatted date (YYYY-MM-DD HH:MM:SS)"
+      echo
+      echo "<trans_id>     Either the blockchain's transaction ID,"
+      echo "               the exchange's transaction ID, or 'N/A'"
+      echo
+    else
+      exchange="${2,,}"
+      currency="${3^^}"
+      trantype="${4,,}"
+      c_amount="${5}"
+      trandate="${6}"
+      trans_id="${7}"
+
+      [ -e "${0}.${exchange}.tsv" ] && ! [[ $(tail -c1 "${0}.${exchange}.tsv" | wc -l) -gt 0 ]] && printf '\n' >> "${0}.${exchange}.tsv"
+      printf '%s\t%s\t%s\t%s\t%s' "${currency}" "${trantype}" "${c_amount}" "${trandate}" "${trans_id}"  >> "${0}.${exchange}.tsv"
+      sort -t$'\t' -k4 "${0}.${exchange}.tsv" > "${0}.${exchange}.tsv.sorted"
+      mv "${0}.${exchange}.tsv.sorted" "${0}.${exchange}.tsv"
+    fi
+    ;;
+
+  spending)
+    for KEY in "${KEYS[@]}"; do
+      if [[ ":coinbase:coinbase_pro:" =~ ":${KEY,,}:" ]]; then
+        printf "\033[2K\rGetting account info from %s..." "${KEY}"
+        if [ "${KEY:0:8}" = "coinbase" ]; then
+          while IFS=$'\t' read -r CRYPTO ACCTID TIMESTAMP; do
+            [[ "${KEY}" == "coinbase_pro" && "${CRYPTO}" != "USD" ]] && continue
+            [ -n "${ACCT}" ] && ACCT+=$'\n'
+            ACCT+="$(sum_ledger "${KEY}" "${ACCTID}" "spending")"
+          done <<< "$(parse_json "${KEY}" "acct_ids" "$(get_accounts "${KEY}" "${AKEY[${CRNT}]}" "${PKEY[${CRNT}]}" "${SKEY[${CRNT}]}")")"
+          RPLY="$(echo "${ACCT}" | awk 'NF')"
+        else
+          RPLY="$(parse_json "${KEY}" "acct_bal" "$(get_accounts "${KEY}" "${AKEY[${CRNT}]}" "${PKEY[${CRNT}]}" "${SKEY[${CRNT}]}")")"
+        fi
+        ETTL="$(echo "${RPLY}" | awk '{ sum += $2; } END { print sum; }')"
+        printf '\033[2K\r%15s%10.2f\n' "${KEY}" "${ETTL}"
+        unset ACCT
+      elif [ -n "${FKEY[${CRNT}]}" ]; then
+        ACCT="$(get_tsv_account "${KEY}" | grep -P 'USD\t')"
+        ETTL="$(echo "${ACCT}" | awk '{ sum += $2; } END { print sum; }')"
+        printf '\033[2K\r%15s%10.2f\n' "${KEY}" "${ETTL}"
+        unset ACCT
+      fi
+      (( CRNT++ ))
+    done
+    ;;
+
+    convert)
+      if [ "${2,,}" == 'help' ]; then
+        echo "${0} ${1}: Convert values between crypto and fiat currencies"
+        echo
+        echo "NOTE:  This command requires a CoinMarketCap API to be set up."
+        echo "Registration is required but gratis unless you make more than"
+        echo "10K calls per month.  See https://coinmarketcap.com/api/pricing/"
+        echo
+        echo "${0} ${1} <value-from> <currency-from> <value-to> <currency-to>"
+        echo
+        echo "<value-from>      Amount of currency to convert from"
+        echo
+        echo "<currency-from>   Type of currency to convert from"
+        echo
+        echo "<value-from>      Amount of currency to convert to"
+        echo
+        echo "<currency-from>   Type of currency to convert to"
+        echo
+      else
+        [[ ${3^^} =~ USD ]] && value1=1 || value1=$(get_cmc_value "${3^^}")
+        [[ ${4^^} =~ USD ]] && value2=1 || value2=$(get_cmc_value "${4^^}")
+        [[ "${value1}" == "-1.00000000" ]] && echo "${3^^} not found."
+        [[ "${value2}" == "-1.00000000" ]] && echo "${4^^} not found."
+        [[ "${value1}" != "-1.00000000" && "${value2}" != "-1.00000000" ]] && printf '%s %s = %s %s\n' "${2}" "${3^^}" "$(awk "BEGIN {print ${value1} / ${value2} * ${2}}")" "${4^^}"
+      fi
+      ;;
+
+    setup)
+      read -p 'Username: ' username
+      prompt='Password: '
+      while IFS= read -p "${prompt}" -r -s -n 1 char; do
+        if [[ $char == $'\0' ]]; then
+          break
+        fi
+        prompt+='*'
+        password+="$char"
+      done
+      read -p '2FA TOTP: ' otptoken
+  
+      curl -sH 'Content-Type: application/json'
+            -H "OTP-Token: ${otptoken}"
+            -d '{ "description": "CryptoReport" }'
+            -u ${username}:${password}
+            -X POST "https://api.uphold.com/v0/me/tokens" | jq
+  
+      # Returns the following
+      # {
+      #   "accessToken": "<hexstring>",
+      #   "description": "CryptoReport",
+      #   "id": "<uuid>"
+      # }
+
+      # Example of adding an entry to the JSON config file:
+      # jq '. + {"StakeCube":{"TSV_File":true,"Type":"Exchange","Rewards":true,"Value_Source":"Binance"}}' /scr/cryptoreport.json > /scr/cryptoreport.json.tmp
+    ;;
+
+    test-api)
+      if [ "${2,,}" == 'help' ]; then
+        echo "${0} ${1}: Test API function calls to exchanges"
+        echo
+        echo "${0} ${1} <exchange> <endpoint> [query_string]"
+        echo
+        echo "<exchange>       Name of the exchange"
+        echo
+        echo "<endpoint>       URI of the endpoint"
+        echo "                 (Everything after the domain name but before the ?)"
+        echo 
+        echo "[query_string]   Additional POST data needed for the endpoint"
+        echo "                 (Everything after the ?)"
+        echo "                 This does NOT include what the API normally expects"
+        echo "                 across all calls.  Timestamps, 2FA codes, signatures"
+        echo "                 and page sizes will be added automatically if they are"
+        echo "                 required by all calls to the exchange's API."
+        echo
+      else
+        needsotp="${OTP_XCHS[*],,}"
+        for exchange in "${WALLETS[@]}"; do
+          if [ "${exchange,,}" = "${2,,}" ]; then
+            api_uri="$(get_api_uri "${exchange}")"
+            endpoint="${3%\?*}"
+            [[ "${3}" = *'?'* ]] && querystr="${3#*\?}"
+            if [ -z "${needsotp##*${exchange,,}*}" ]; then
+              printf 'Give me that OTP for %s: ' "${exchange}"
+              read -r OTPASSWD
+              printf '\n'
+            fi 
+            gather_response "${exchange}" "${api_uri}" "${endpoint}" "${querystr}"
+          fi
+          (( CRNT++ ))
+        done
+      fi
+    ;;
+
+    help)
+      show_help
+    ;;
+
+    *)
+      echo "Unknown command ${1}"
+      show_help
+    ;;
+    
+esac
