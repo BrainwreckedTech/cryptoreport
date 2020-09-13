@@ -991,6 +991,50 @@ case "${1}" in
       fi
       ;;
 
+    show)
+      case "${2,,}" in
+        help)
+        ;;
+        config)
+          printf '%15s %-9s %-15s %-11s %-11s %-11s %-3s %-3s %-5s\n' "ENTRY" "TYPE" "ALT_VAL_SRC" "API_KEY" "API_SECRET" "PASSWORD" "CSV" "TSV" "REWARDS" 
+          for entry in $(jq '. | to_entries[] | [.key] | @tsv' "${0}.json" | tr -d '"'); do
+
+            api_key="$(jq -M ".${entry}.API_Key" "${0}.json" | tr -d '"' | sed 's/null//g')"; [ -z "${api_key}" ] && unset api_key
+            api_scrt="$(jq -M ".${entry}.API_Secret" "${0}.json" | tr -d '"' | sed 's/null//g')"; [ -z "${api_scrt}" ] && unset api_scrt
+            api_pswd="$(jq -M ".${entry}.API_Password" "${0}.json" | tr -d '"' | sed 's/null//g')"; [ -z "${api_pswd}" ] && unset api_pswd
+            csv_file="$(jq -M ".${entry}.CSV_File" "${0}.json" | tr -d '"' | sed 's/null//g;s/true/🗸/g;s/false/❌/g;')"; [ -z "${csv_file}" ] && csv_file="$(echo -e '\u200B')"
+            tsv_file="$(jq -M ".${entry}.TSV_File" "${0}.json" | tr -d '"' | sed 's/null//g;s/true/🗸/g;s/false/❌/g;')"; [ -z "${tsv_file}" ] && tsv_file="$(echo -e '\u200B')"
+            ent_type="$(jq -M ".${entry}.Type" "${0}.json" | tr -d '"' | sed 's/null//g')"
+            has_rwrd="$(jq -M ".${entry}.Rewards" "${0}.json" | tr -d '"' | sed 's/null//g;s/true/🗸/g;s/false/❌/g;')"
+            valuesrc="$(jq -M ".${entry}.Value_Source" "${0}.json" | tr -d '"' | sed 's/null//g')"
+
+            printf '%15s %-9s %-15s %-11s %-11s %-12s %-6s %-8s %-8s\n' \
+              "${entry}" "${ent_type}" "${valuesrc}" \
+              "${api_key:0:4}${api_key+...}${api_key: -4:4}" "${api_scrt:0:4}${api_scrt+...}${api_scrt: -4:4}" "${api_pswd:0:4}${api_pswd+...}${api_pswd: -4:4}" \
+              "${csv_file}" "${tsv_file}" "${has_rwrd}"
+
+          done
+        ;;
+        *)
+          if [ -e "${0}.${2,,}.csv" ]; then
+            case ${2,,} in
+              celsius) tsv_data="$(csvawk -d '{OFS="\t"; print $4, $3, $5, $2, $1}' <<< "$(sed 's/, 20/ 20/g' "${0}.celsius.csv")" | tr -d '"' | sed 's/MCDAI/DAI/g;s/bonus_token/bonus/g;s/wal/w/g')" ;;
+            esac
+            while IFS=$'\t' read -a tsv_line; do
+              [ "${tsv_line[1]}" = "withdraw" ] && tsv_line[2]=${tsv_line[2]:1}
+              printf '%-6s   %-8s   %16.8f   %19s   %-1s\n' "${tsv_line[0]}" "${tsv_line[1]}" "${tsv_line[2]}" "$(date -d "${tsv_line[3]}" +%Y-%m-%d\ %H:%M:%S)" "${tsv_line[4]}" 
+            done <<< "${tsv_data}"
+          elif [ -e "${0}.${2,,}.tsv" ]; then
+            while IFS=$'\t' read -a tsv_line; do
+              printf '%-6s   %-8s   %16.8f   %19s   %-1s\n' "${tsv_line[0]}" "${tsv_line[1]}" "${tsv_line[2]}" "${tsv_line[3]}" "${tsv_line[4]}" 
+            done < "${0}.${2,,}.tsv"
+          else
+            printf "Can't show %s\n" ${2,,}
+          fi
+        ;;
+      esac
+    ;;
+
     setup)
       read -p 'Username: ' username
       prompt='Password: '
