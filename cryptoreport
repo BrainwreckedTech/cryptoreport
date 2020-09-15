@@ -933,7 +933,7 @@ case "${1}" in
       [ -e "${0}.${exchange}.tsv" ] && tsv_file=$(<"${0}.${exchange}.tsv")
       [[ $tsv_file = *$'\t'* ]] && [ "${tsv_file: -1:1}" != "$'\n'" ] && tsv_file+=$'\n'
       tsv_file+="$(printf '%s\t%s\t%s\t%s\t%s' "${currency}" "${trantype}" "${c_amount}" "${trandate}" "${trans_id}" | awk 'NF')"
-      printf '%s' "$(sort -t$'\t' -k4 <<< "${tsv_file}")" > "${0}.${exchange}.tsv"
+      printf '%s\n' "$(sort -t$'\t' -k4 <<< "${tsv_file}")" > "${0}.${exchange}.tsv"
     fi
     ;;
 
