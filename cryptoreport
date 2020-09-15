@@ -930,10 +930,10 @@ case "${1}" in
       trandate="${6}"
       trans_id="${7}"
 
-      [ -e "${0}.${exchange}.tsv" ] && ! [[ $(tail -c1 "${0}.${exchange}.tsv" | wc -l) -gt 0 ]] && printf '\n' >> "${0}.${exchange}.tsv"
-      printf '%s\t%s\t%s\t%s\t%s' "${currency}" "${trantype}" "${c_amount}" "${trandate}" "${trans_id}"  >> "${0}.${exchange}.tsv"
-      sort -t$'\t' -k4 "${0}.${exchange}.tsv" > "${0}.${exchange}.tsv.sorted"
-      mv "${0}.${exchange}.tsv.sorted" "${0}.${exchange}.tsv"
+      [ -e "${0}.${exchange}.tsv" ] && tsv_file=$(<"${0}.${exchange}.tsv")
+      [[ $tsv_file = *$'\t'* ]] && [ "${tsv_file: -1:1}" != "$'\n'" ] && tsv_file+=$'\n'
+      tsv_file+="$(printf '%s\t%s\t%s\t%s\t%s' "${currency}" "${trantype}" "${c_amount}" "${trandate}" "${trans_id}" | awk 'NF')"
+      printf '%s' "$(sort -t$'\t' -k4 <<< "${tsv_file}")" > "${0}.${exchange}.tsv"
     fi
     ;;
 
