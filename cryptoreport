@@ -684,13 +684,10 @@ case "${1}" in
     else
       for EXCHANGE in "${WALLETS[@]}"; do
         if [ "$(get_config ".${EXCHANGE}.Type")" != "Data" ]; then
-          if [ "$(get_config ".${EXCHANGE}.TSV_File")" = "true" ]; then
+          if [ "$(get_config ".${EXCHANGE}.API_Key")" = "null" ]; then
             printf "\033[2K\rGetting account info from %s..." "${EXCHANGE}"
             TSV_DATA+="$(awk -F$'\t' '{OFS=FS; print "'${EXCHANGE}'", $1, $2, $3}' <<< "$(get_tsv_account "${EXCHANGE}")")"$'\n'
-          elif [ "$(get_config ".${EXCHANGE}.CSV_File")" = "true" ]; then
-            printf "\033[2K\rGetting account info from %s..." "${EXCHANGE}"
-            TSV_DATA+="$(awk -F$'\t' '{OFS=FS; print "'${EXCHANGE}'", $1, $2, $3}' <<< "$(get_csv_account "${EXCHANGE}")")"$'\n'
-          elif [ "$(get_config ".${EXCHANGE}.API_Key")" != "null" ]; then
+          else
             printf "\033[2K\rGetting account info from %s..." "${EXCHANGE}"
             if [ "${EXCHANGE,,}" = "kucoin_lock" ]; then
               while IFS=$'\t' read -r CURRENCY ACCT_NUM TIMESTAMP; do
@@ -889,7 +886,10 @@ case "${1}" in
     ;;
 
   import)
-    if [ "${2,,}" == 'help' ]; then
+    exchange="${2,,}"
+    uri="${3}"
+
+    if [ "${exchange}" == 'help' ]; then
       echo "${0} ${1}: Bring in a CSV export file from an exchange."
       echo
       echo "${0} ${1} <exchange> <url>"
@@ -899,7 +899,18 @@ case "${1}" in
       echo "<url>          The download link of the CSV file"
       echo
     else
-      curl "${3}" -o "${0}.${2,,}.csv"
+      csv_file="$(curl "${uri}")"
+      case ${exchange} in
+        celsius)
+          tsv_file="$(csvawk -d '{OFS="\t"; print $4, $3, $5, $2, $1}' <<< "${csv_file}" | tr -d '"')"
+          tsv_file="${tsv_file//, 20/ 20}"
+          tsv_file="${tsv_file//MCDAI/DAI}"
+          tsv_file="${tsv_file//bonus_token/bonus}"
+          tsv_file="${tsv_file//withdrawal$'\t'-/withdraw$'\t'}"
+          tsv_file="$(awk 'BEGIN {FS=OFS="\t"} {"date -d\"" $4 "\" +\"%Y-%m-%d %H:%M:%S\"" | getline mydate; print $1, $2, $3, mydate, $5}' <<< "${tsv_file}")"
+        ;;
+      esac
+      printf '%s\n' "$(sort -t$'\t' -k4 <<< "${tsv_file}")" > "${0}.${exchange}.tsv"
     fi
     ;;
 
@@ -1016,15 +1027,7 @@ case "${1}" in
         done
         ;;
       *)
-        if [ -e "${0}.${2,,}.csv" ]; then
-          case ${2,,} in
-            celsius) tsv_data="$(csvawk -d '{OFS="\t"; print $4, $3, $5, $2, $1}' <<< "$(sed 's/, 20/ 20/g' "${0}.celsius.csv")" | tr -d '"' | sed 's/MCDAI/DAI/g;s/bonus_token/bonus/g;s/wal/w/g')" ;;
-          esac
-          while IFS=$'\t' read -a tsv_line; do
-            [ "${tsv_line[1]}" = "withdraw" ] && tsv_line[2]=${tsv_line[2]:1}
-            printf '%-6s   %-8s   %16.8f   %19s   %-1s\n' "${tsv_line[0]}" "${tsv_line[1]}" "${tsv_line[2]}" "$(date -d "${tsv_line[3]}" +%Y-%m-%d\ %H:%M:%S)" "${tsv_line[4]}"
-          done <<< "${tsv_data}"
-        elif [ -e "${0}.${2,,}.tsv" ]; then
+        if [ -e "${0}.${2,,}.tsv" ]; then
           while IFS=$'\t' read -a tsv_line; do
             printf '%-6s   %-8s   %16.8f   %19s   %-1s\n' "${tsv_line[0]}" "${tsv_line[1]}" "${tsv_line[2]}" "${tsv_line[3]}" "${tsv_line[4]}"
           done < "${0}.${2,,}.tsv"

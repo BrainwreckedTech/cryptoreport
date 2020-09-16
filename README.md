@@ -4,17 +4,17 @@ A BASH script to track and report on your crypto currency holdings.
 
 ## Supported Exchanges
 
-| Exchange                | API | CSV | TSV Only |
-|-------------------------|:---:|:---:|:--------:|
-| Binance_US              |  ✔  |  ✖  |          |
-| Binance (International) |  ✔  |  ✖  |          |
-| BlockFi                 |  ✖  |  ✖  |    ✔     |
-| Celsius                 |  ✖  |  ✔  |          |
-| Coinbase                |  ✔  |  ✖  |          |
-| Coinbase_Pro            |  ✔  |  ✖  |          |
-| Kraken                  |  ✔¹ |  ✖  |          |
-| KuCoin                  |  ✔  |  ✖  |          |
-| StakeCube               |  ✖  |  ✖  |    ✔     |
+| Exchange                | API | CSV | Manual Entry Only |
+|-------------------------|:---:|:---:|:-----------------:|
+| Binance_US              |  ✔  |  ✖  |                  |
+| Binance (International) |  ✔  |  ✖  |                  |
+| BlockFi                 |  ✖  |  ✖  |        ✔         |
+| Celsius                 |  ✖  |  ✔  |                  |
+| Coinbase                |  ✔  |  ✖  |                  |
+| Coinbase_Pro            |  ✔  |  ✖  |                  |
+| Kraken                  |  ✔¹ |  ✖  |                  |
+| KuCoin                  |  ✔  |  ✖  |                  |
+| StakeCube               |  ✖  |  ✖  |        ✔         |
 
 ***Any*** exchange that is not supported by API or CSV may be tracked manually.  Exchanges listed here as TSV-Only are known to have neither CSV export nor API access.  
 
@@ -36,8 +36,6 @@ Configuration is handled with the `cryptoreport.json` file.
     "API_Key": "Your_API_Key",
     "API_Secret": "Your_Secret/Private_Key",
     "API_Password": "Your_API_Password",
-    "CSV_File": true/false,
-    "TSV_File": true/false,
     "Type": "Data/Exchange",
     "Rewards": true/false,
     "Value_Source": "Exchange_Name"
@@ -45,16 +43,10 @@ Configuration is handled with the `cryptoreport.json` file.
 }
 ```
 - **API_Key, API_Secret, API_Password**  
-  When using API access, set the relevant JSON keys.  Relevant for both `Data` and `Exchange` types.
-
-- **CSV_File**  
-  When `Type`=`Exchange` and you are using exported CSV files from the exchange, set to `true`.
-
-- **TSV_File**  
-  When `Type`=`Exchange` and you are tracking transactions manually, set to `true`.
+  When using API access, set the relevant JSON keys.  Relevant for both `Data` and `Exchange` types.  If `API_Key` is not set when `Type`=`Exchange` then `cryptoreport` assumes a manually-tracked exchange (either CSV import or manual ledger entries).
 
 - **Type**  
-  Either `Data` for Data APIs or `Exchange` for exchanges.
+  Either `Exchange` for exchanges or `Data` otherwise.
 
 - **Rewards**  
   When `Type`=`Exchange` and you are receiving rewards (interest, etc.), set to `true`.
@@ -96,7 +88,6 @@ Configuration is handled with the `cryptoreport.json` file.
 ```json
 {
   "Celsius": {
-  "CSV_File": true,
   "Type": "Exchange",
   "Rewards": true,
   "Value_Source": "Coinbase_Pro"
@@ -104,18 +95,21 @@ Configuration is handled with the `cryptoreport.json` file.
 }
 ```
 
+Use `cryptoreport import` to manually import transactions from CSV exports.
+
 #### Manually-Tracked Exchange
 
 ```JSON
 {
   "StakeCube": {
-  "TSV_File": true,
   "Type": "Exchange",
   "Rewards": true,
   "Value_Source": "Binance"
   }
 }
 ```
+
+Use `cryptoreport add` to manually add ledger entries to a manually-tracked exchanges.
 
 ## Usage
 
