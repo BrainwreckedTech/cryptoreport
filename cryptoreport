@@ -964,150 +964,150 @@ case "${1}" in
     done
     ;;
 
-    convert)
-      if [ "${2,,}" == 'help' ]; then
-        echo "${0} ${1}: Convert values between crypto and fiat currencies"
-        echo
-        echo "NOTE:  This command requires a CoinMarketCap API to be set up."
-        echo "Registration is required but gratis unless you make more than"
-        echo "10K calls per month.  See https://coinmarketcap.com/api/pricing/"
-        echo
-        echo "${0} ${1} <value-from> <currency-from> <value-to> <currency-to>"
-        echo
-        echo "<value-from>      Amount of currency to convert from"
-        echo
-        echo "<currency-from>   Type of currency to convert from"
-        echo
-        echo "<value-from>      Amount of currency to convert to"
-        echo
-        echo "<currency-from>   Type of currency to convert to"
-        echo
-      else
-        [[ ${3^^} =~ USD ]] && value1=1 || value1=$(get_cmc_value "${3^^}")
-        [[ ${4^^} =~ USD ]] && value2=1 || value2=$(get_cmc_value "${4^^}")
-        [[ "${value1}" == "-1.00000000" ]] && echo "${3^^} not found."
-        [[ "${value2}" == "-1.00000000" ]] && echo "${4^^} not found."
-        [[ "${value1}" != "-1.00000000" && "${value2}" != "-1.00000000" ]] && printf '%s %s = %s %s\n' "${2}" "${3^^}" "$(awk "BEGIN {print ${value1} / ${value2} * ${2}}")" "${4^^}"
-      fi
-      ;;
-
-    show)
-      case "${2,,}" in
-        help)
-        ;;
-        config)
-          printf '%15s %-9s %-15s %-11s %-11s %-11s %-3s %-3s %-5s\n' "ENTRY" "TYPE" "ALT_VAL_SRC" "API_KEY" "API_SECRET" "PASSWORD" "CSV" "TSV" "REWARDS" 
-          for entry in $(jq '. | to_entries[] | [.key] | @tsv' "${0}.json" | tr -d '"'); do
-
-            api_key="$(jq -M ".${entry}.API_Key" "${0}.json" | tr -d '"' | sed 's/null//g')"; [ -z "${api_key}" ] && unset api_key
-            api_scrt="$(jq -M ".${entry}.API_Secret" "${0}.json" | tr -d '"' | sed 's/null//g')"; [ -z "${api_scrt}" ] && unset api_scrt
-            api_pswd="$(jq -M ".${entry}.API_Password" "${0}.json" | tr -d '"' | sed 's/null//g')"; [ -z "${api_pswd}" ] && unset api_pswd
-            csv_file="$(jq -M ".${entry}.CSV_File" "${0}.json" | tr -d '"' | sed 's/null//g;s/true/🗸/g;s/false/❌/g;')"; [ -z "${csv_file}" ] && csv_file="$(echo -e '\u200B')"
-            tsv_file="$(jq -M ".${entry}.TSV_File" "${0}.json" | tr -d '"' | sed 's/null//g;s/true/🗸/g;s/false/❌/g;')"; [ -z "${tsv_file}" ] && tsv_file="$(echo -e '\u200B')"
-            ent_type="$(jq -M ".${entry}.Type" "${0}.json" | tr -d '"' | sed 's/null//g')"
-            has_rwrd="$(jq -M ".${entry}.Rewards" "${0}.json" | tr -d '"' | sed 's/null//g;s/true/🗸/g;s/false/❌/g;')"
-            valuesrc="$(jq -M ".${entry}.Value_Source" "${0}.json" | tr -d '"' | sed 's/null//g')"
-
-            printf '%15s %-9s %-15s %-11s %-11s %-12s %-6s %-8s %-8s\n' \
-              "${entry}" "${ent_type}" "${valuesrc}" \
-              "${api_key:0:4}${api_key+...}${api_key: -4:4}" "${api_scrt:0:4}${api_scrt+...}${api_scrt: -4:4}" "${api_pswd:0:4}${api_pswd+...}${api_pswd: -4:4}" \
-              "${csv_file}" "${tsv_file}" "${has_rwrd}"
-
-          done
-        ;;
-        *)
-          if [ -e "${0}.${2,,}.csv" ]; then
-            case ${2,,} in
-              celsius) tsv_data="$(csvawk -d '{OFS="\t"; print $4, $3, $5, $2, $1}' <<< "$(sed 's/, 20/ 20/g' "${0}.celsius.csv")" | tr -d '"' | sed 's/MCDAI/DAI/g;s/bonus_token/bonus/g;s/wal/w/g')" ;;
-            esac
-            while IFS=$'\t' read -a tsv_line; do
-              [ "${tsv_line[1]}" = "withdraw" ] && tsv_line[2]=${tsv_line[2]:1}
-              printf '%-6s   %-8s   %16.8f   %19s   %-1s\n' "${tsv_line[0]}" "${tsv_line[1]}" "${tsv_line[2]}" "$(date -d "${tsv_line[3]}" +%Y-%m-%d\ %H:%M:%S)" "${tsv_line[4]}" 
-            done <<< "${tsv_data}"
-          elif [ -e "${0}.${2,,}.tsv" ]; then
-            while IFS=$'\t' read -a tsv_line; do
-              printf '%-6s   %-8s   %16.8f   %19s   %-1s\n' "${tsv_line[0]}" "${tsv_line[1]}" "${tsv_line[2]}" "${tsv_line[3]}" "${tsv_line[4]}" 
-            done < "${0}.${2,,}.tsv"
-          else
-            printf "Can't show %s\n" ${2,,}
-          fi
-        ;;
-      esac
+  convert)
+    if [ "${2,,}" == 'help' ]; then
+      echo "${0} ${1}: Convert values between crypto and fiat currencies"
+      echo
+      echo "NOTE:  This command requires a CoinMarketCap API to be set up."
+      echo "Registration is required but gratis unless you make more than"
+      echo "10K calls per month.  See https://coinmarketcap.com/api/pricing/"
+      echo
+      echo "${0} ${1} <value-from> <currency-from> <value-to> <currency-to>"
+      echo
+      echo "<value-from>      Amount of currency to convert from"
+      echo
+      echo "<currency-from>   Type of currency to convert from"
+      echo
+      echo "<value-from>      Amount of currency to convert to"
+      echo
+      echo "<currency-from>   Type of currency to convert to"
+      echo
+    else
+      [[ ${3^^} =~ USD ]] && value1=1 || value1=$(get_cmc_value "${3^^}")
+      [[ ${4^^} =~ USD ]] && value2=1 || value2=$(get_cmc_value "${4^^}")
+      [[ "${value1}" == "-1.00000000" ]] && echo "${3^^} not found."
+      [[ "${value2}" == "-1.00000000" ]] && echo "${4^^} not found."
+      [[ "${value1}" != "-1.00000000" && "${value2}" != "-1.00000000" ]] && printf '%s %s = %s %s\n' "${2}" "${3^^}" "$(awk "BEGIN {print ${value1} / ${value2} * ${2}}")" "${4^^}"
+    fi
     ;;
 
-    setup)
-      read -p 'Username: ' username
-      prompt='Password: '
-      while IFS= read -p "${prompt}" -r -s -n 1 char; do
-        if [[ $char == $'\0' ]]; then
-          break
-        fi
-        prompt+='*'
-        password+="$char"
-      done
-      read -p '2FA TOTP: ' otptoken
-  
-      curl -sH 'Content-Type: application/json'
-            -H "OTP-Token: ${otptoken}"
-            -d '{ "description": "CryptoReport" }'
-            -u ${username}:${password}
-            -X POST "https://api.uphold.com/v0/me/tokens" | jq
-  
-      # Returns the following
-      # {
-      #   "accessToken": "<hexstring>",
-      #   "description": "CryptoReport",
-      #   "id": "<uuid>"
-      # }
+  show)
+    case "${2,,}" in
+      help)
+        ;;
+      config)
+        printf '%15s %-9s %-15s %-11s %-11s %-11s %-3s %-3s %-5s\n' "ENTRY" "TYPE" "ALT_VAL_SRC" "API_KEY" "API_SECRET" "PASSWORD" "CSV" "TSV" "REWARDS"
+        for entry in $(jq '. | to_entries[] | [.key] | @tsv' "${0}.json" | tr -d '"'); do
 
-      # Example of adding an entry to the JSON config file:
-      # jq '. + {"StakeCube":{"TSV_File":true,"Type":"Exchange","Rewards":true,"Value_Source":"Binance"}}' /scr/cryptoreport.json > /scr/cryptoreport.json.tmp
-    ;;
+          api_key="$(jq -M ".${entry}.API_Key" "${0}.json" | tr -d '"' | sed 's/null//g')"; [ -z "${api_key}" ] && unset api_key
+          api_scrt="$(jq -M ".${entry}.API_Secret" "${0}.json" | tr -d '"' | sed 's/null//g')"; [ -z "${api_scrt}" ] && unset api_scrt
+          api_pswd="$(jq -M ".${entry}.API_Password" "${0}.json" | tr -d '"' | sed 's/null//g')"; [ -z "${api_pswd}" ] && unset api_pswd
+          csv_file="$(jq -M ".${entry}.CSV_File" "${0}.json" | tr -d '"' | sed 's/null//g;s/true/🗸/g;s/false/❌/g;')"; [ -z "${csv_file}" ] && csv_file="$(echo -e '\u200B')"
+          tsv_file="$(jq -M ".${entry}.TSV_File" "${0}.json" | tr -d '"' | sed 's/null//g;s/true/🗸/g;s/false/❌/g;')"; [ -z "${tsv_file}" ] && tsv_file="$(echo -e '\u200B')"
+          ent_type="$(jq -M ".${entry}.Type" "${0}.json" | tr -d '"' | sed 's/null//g')"
+          has_rwrd="$(jq -M ".${entry}.Rewards" "${0}.json" | tr -d '"' | sed 's/null//g;s/true/🗸/g;s/false/❌/g;')"
+          valuesrc="$(jq -M ".${entry}.Value_Source" "${0}.json" | tr -d '"' | sed 's/null//g')"
 
-    test-api)
-      if [ "${2,,}" == 'help' ]; then
-        echo "${0} ${1}: Test API function calls to exchanges"
-        echo
-        echo "${0} ${1} <exchange> <endpoint> [query_string]"
-        echo
-        echo "<exchange>       Name of the exchange"
-        echo
-        echo "<endpoint>       URI of the endpoint"
-        echo "                 (Everything after the domain name but before the ?)"
-        echo 
-        echo "[query_string]   Additional POST data needed for the endpoint"
-        echo "                 (Everything after the ?)"
-        echo "                 This does NOT include what the API normally expects"
-        echo "                 across all calls.  Timestamps, 2FA codes, signatures"
-        echo "                 and page sizes will be added automatically if they are"
-        echo "                 required by all calls to the exchange's API."
-        echo
-      else
-        needsotp="${OTP_XCHS[*],,}"
-        for exchange in "${WALLETS[@]}"; do
-          if [ "${exchange,,}" = "${2,,}" ]; then
-            api_uri="$(get_api_uri "${exchange}")"
-            endpoint="${3%\?*}"
-            [[ "${3}" = *'?'* ]] && querystr="${3#*\?}"
-            if [ -z "${needsotp##*${exchange,,}*}" ]; then
-              printf 'Give me that OTP for %s: ' "${exchange}"
-              read -r OTPASSWD
-              printf '\n'
-            fi 
-            gather_response "${exchange}" "${api_uri}" "${endpoint}" "${querystr}"
-          fi
-          (( CRNT++ ))
+          printf '%15s %-9s %-15s %-11s %-11s %-12s %-6s %-8s %-8s\n' \
+            "${entry}" "${ent_type}" "${valuesrc}" \
+            "${api_key:0:4}${api_key+...}${api_key: -4:4}" "${api_scrt:0:4}${api_scrt+...}${api_scrt: -4:4}" "${api_pswd:0:4}${api_pswd+...}${api_pswd: -4:4}" \
+            "${csv_file}" "${tsv_file}" "${has_rwrd}"
+
         done
+        ;;
+      *)
+        if [ -e "${0}.${2,,}.csv" ]; then
+          case ${2,,} in
+            celsius) tsv_data="$(csvawk -d '{OFS="\t"; print $4, $3, $5, $2, $1}' <<< "$(sed 's/, 20/ 20/g' "${0}.celsius.csv")" | tr -d '"' | sed 's/MCDAI/DAI/g;s/bonus_token/bonus/g;s/wal/w/g')" ;;
+          esac
+          while IFS=$'\t' read -a tsv_line; do
+            [ "${tsv_line[1]}" = "withdraw" ] && tsv_line[2]=${tsv_line[2]:1}
+            printf '%-6s   %-8s   %16.8f   %19s   %-1s\n' "${tsv_line[0]}" "${tsv_line[1]}" "${tsv_line[2]}" "$(date -d "${tsv_line[3]}" +%Y-%m-%d\ %H:%M:%S)" "${tsv_line[4]}"
+          done <<< "${tsv_data}"
+        elif [ -e "${0}.${2,,}.tsv" ]; then
+          while IFS=$'\t' read -a tsv_line; do
+            printf '%-6s   %-8s   %16.8f   %19s   %-1s\n' "${tsv_line[0]}" "${tsv_line[1]}" "${tsv_line[2]}" "${tsv_line[3]}" "${tsv_line[4]}"
+          done < "${0}.${2,,}.tsv"
+        else
+          printf "Can't show %s\n" ${2,,}
+        fi
+        ;;
+    esac
+    ;;
+
+  setup)
+    read -p 'Username: ' username
+    prompt='Password: '
+    while IFS= read -p "${prompt}" -r -s -n 1 char; do
+      if [[ $char == $'\0' ]]; then
+        break
       fi
+      prompt+='*'
+      password+="$char"
+    done
+    read -p '2FA TOTP: ' otptoken
+  
+    curl -sH 'Content-Type: application/json'
+          -H "OTP-Token: ${otptoken}"
+          -d '{ "description": "CryptoReport" }'
+          -u ${username}:${password}
+          -X POST "https://api.uphold.com/v0/me/tokens" | jq
+  
+    # Returns the following
+    # {
+    #   "accessToken": "<hexstring>",
+    #   "description": "CryptoReport",
+    #   "id": "<uuid>"
+    # }
+
+    # Example of adding an entry to the JSON config file:
+    # jq '. + {"StakeCube":{"TSV_File":true,"Type":"Exchange","Rewards":true,"Value_Source":"Binance"}}' /scr/cryptoreport.json > /scr/cryptoreport.json.tmp
     ;;
 
-    help)
-      show_help
+  test-api)
+    if [ "${2,,}" == 'help' ]; then
+      echo "${0} ${1}: Test API function calls to exchanges"
+      echo
+      echo "${0} ${1} <exchange> <endpoint> [query_string]"
+      echo
+      echo "<exchange>       Name of the exchange"
+      echo
+      echo "<endpoint>       URI of the endpoint"
+      echo "                 (Everything after the domain name but before the ?)"
+      echo
+      echo "[query_string]   Additional POST data needed for the endpoint"
+      echo "                 (Everything after the ?)"
+      echo "                 This does NOT include what the API normally expects"
+      echo "                 across all calls.  Timestamps, 2FA codes, signatures"
+      echo "                 and page sizes will be added automatically if they are"
+      echo "                 required by all calls to the exchange's API."
+      echo
+    else
+      needsotp="${OTP_XCHS[*],,}"
+      for exchange in "${WALLETS[@]}"; do
+        if [ "${exchange,,}" = "${2,,}" ]; then
+          api_uri="$(get_api_uri "${exchange}")"
+          endpoint="${3%\?*}"
+          [[ "${3}" = *'?'* ]] && querystr="${3#*\?}"
+          if [ -z "${needsotp##*${exchange,,}*}" ]; then
+            printf 'Give me that OTP for %s: ' "${exchange}"
+            read -r OTPASSWD
+            printf '\n'
+          fi
+          gather_response "${exchange}" "${api_uri}" "${endpoint}" "${querystr}"
+        fi
+        (( CRNT++ ))
+      done
+    fi
     ;;
 
-    *)
-      echo "Unknown command ${1}"
-      show_help
+  help)
+    show_help
     ;;
-    
+
+  *)
+    echo "Unknown command ${1}"
+    show_help
+    ;;
+
 esac
