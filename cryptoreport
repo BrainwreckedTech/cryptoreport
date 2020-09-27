@@ -798,7 +798,7 @@ case "${1}" in
     if [ "${2,,}" == 'help' ]; then
       echo "${0} ${1}: List the rewards each exchange has given you."
       echo
-      echo "${0} ${1} <time_range>"
+      echo "${0} ${1} <time_range> <format>"
       echo
       echo "<time_range>   One of the following:"
       echo "               - today        - yesterday    - day-before"
@@ -806,7 +806,12 @@ case "${1}" in
       echo "               - this-month   - last month"
       echo "               - A specific date in the YYYY-MM-DD format"
       echo
+      echo "<format>       One of the folowing:"
+      echo "                 display: Pretty-print in the terminal (default)"
+      echo "                     csv: Print in terminal in CSV format"
+      echo
     else
+      [ -z "${3}" ] && format="display" || format="${3,,}"
       for EXCHANGE in "${WALLETS[@]}"; do
         unset RWRD
         if [ "$(get_config ".${EXCHANGE}.Rewards")" == "true" ]; then
@@ -840,47 +845,90 @@ case "${1}" in
 
       LISTINGS=${LISTINGS%$'\n'}
 
-      CHDRS=( 'DATE' 'EXCHGANGE' 'COIN' 'PRICE' 'REWARD' 'VALUE' )
-      CWIDS=( '-19s' '-12s'      '-6s'  '16.8f'  '16.8f' '10b' )
+      case "${format}" in
+        csv)
+          echo "Date,Exchange,Coin,Price,Reward,Value"
+          ;;
+        display)
+          CHDRS=( 'DATE' 'EXCHGANGE' 'COIN' 'PRICE' 'REWARD' 'VALUE' )
+          CWIDS=( '-19s' '-12s'      '-6s'  '16.8f'  '16.8f' '10b' )
 
-      print_header
-      printf '\033[92m'
-      print_sepline
+          print_header
+          printf '\033[92m'
+          print_sepline
 
-      LCV=0
-      FRMT="$(row_format)"
+          LCV=0
+          FRMT="$(row_format)"
+          ;;
+      esac
 
       while IFS=$'\t' read -r EXCHANGE TIMESTMP CURRENCY BALANCE MRKT_PRC TOTALVAL; do
-        (( LCV++ ))
-        [ $(( LCV % 2 )) = 1 ] && printf '\033[92m'
-        printf "${FRMT}" "$(date -u -d@"${TIMESTMP}" +"%Y-%m-%d %H:%M:%S")" "${EXCHANGE}" "${CURRENCY}" "${MRKT_PRC}" "${BALANCE}" "$( format_fiat 10 "${TOTALVAL}" )"
+        case "${format}" in
+          csv)
+            echo "$(date -u -d@"${TIMESTMP}" +"%Y-%m-%d %H:%M:%S"),${EXCHANGE},${CURRENCY},${MRKT_PRC},${BALANCE},${TOTALVAL}"
+            ;;
+          display)
+            (( LCV++ ))
+            [ $(( LCV % 2 )) = 1 ] && printf '\033[92m'
+            printf "${FRMT}" "$(date -u -d@"${TIMESTMP}" +"%Y-%m-%d %H:%M:%S")" "${EXCHANGE}" "${CURRENCY}" "${MRKT_PRC}" "${BALANCE}" "$(format_fiat 10 "${TOTALVAL}")"
+            ;;
+        esac
       done <<< "$(sort -rnk2 <<< "${LISTINGS}")"
 
-      [ $(( LCV % 2 )) =  0 ] && printf '\033[92m'
-      print_sepline
       group_coin_values "${LISTINGS}"
 
-      CWIDS=( '30s' '-19s' '-6s' '15.8f' '10b' )
-      FRMT="$(row_format)"
+      case "${format}" in
+        csv)
+          echo
+          echo "Date,Coin,Reward,Value"
+          ;;
+        display)
+          [ $(( LCV % 2 )) =  0 ] && printf '\033[92m'
+          print_sepline
+          CWIDS=( '30s' '-19s' '-6s' '15.8f' '10b' )
+          FRMT="$(row_format)"
+          ;;
+      esac
 
       while IFS=$'\t' read -r CURRENCY BALANCE TOTALVAL LASTTRAN; do
-        (( LCV++ ))
-        [ $(( LCV % 2 )) = 0 ] && printf '\033[92m'
-        printf "${FRMT}" "" "$(date -u -d@"${LASTTRAN}" +"%Y-%m-%d %H:%M:%S")" "${CURRENCY}" "${BALANCE}" "$( format_fiat 10 "${TOTALVAL}" )"
+        case "${format}" in
+          csv)
+            echo "$(date -u -d@"${LASTTRAN}" +"%Y-%m-%d %H:%M:%S"),${CURRENCY},${BALANCE},${TOTALVAL}"
+            ;;
+          display)
+            (( LCV++ ))
+            [ $(( LCV % 2 )) = 0 ] && printf '\033[92m'
+            printf "${FRMT}" "" "$(date -u -d@"${LASTTRAN}" +"%Y-%m-%d %H:%M:%S")" "${CURRENCY}" "${BALANCE}" "$(format_fiat 10 "${TOTALVAL}")"
+            ;;
+        esac
       done <<< "$(sort -rnk4 <<< "${COINLIST}")"
 
-      [ $(( LCV % 2 )) = 1 ] && printf '\033[92m'
-      print_sepline
       group_exchange_values "${LISTINGS}"
 
-      CWIDS=( '60s' '12s' '10b')
-
-      FRMT="$(row_format)"
+      case "${format}" in
+        csv)
+          echo
+          echo "Exchange,Value"
+          ;;
+        display)
+          [ $(( LCV % 2 )) = 1 ] && printf '\033[92m'
+          print_sepline
+          CWIDS=( '60s' '12s' '10b')
+          FRMT="$(row_format)"
+          ;;
+      esac
 
       while IFS=$'\t' read -r EXCHANGE TOTALVAL; do
-        (( LCV++ ))
-        [ $(( LCV % 2 )) = 1 ] && printf '\033[92m'
-        printf "${FRMT}" "" "${EXCHANGE}" "$( format_fiat 10 "${TOTALVAL}" )"
+        case "${format}" in
+          csv)
+            echo "${EXCHANGE},${TOTALVAL}"
+            ;;
+          display)
+            (( LCV++ ))
+            [ $(( LCV % 2 )) = 1 ] && printf '\033[92m'
+            printf "${FRMT}" "" "${EXCHANGE}" "$(format_fiat 10 "${TOTALVAL}")"
+            ;;
+        esac
       done <<< "$(sort -rnk2 <<< "${XCHGLIST}")"
     fi
     ;;
@@ -949,12 +997,12 @@ case "${1}" in
     ;;
 
   spending)
-    for KEY in "${KEYS[@]}"; do
+    for KEY in "${WALLETS[@]}"; do
       if [[ ":coinbase:coinbase_pro:" =~ ":${KEY,,}:" ]]; then
         printf "\033[2K\rGetting account info from %s..." "${KEY}"
-        if [ "${KEY:0:8}" = "coinbase" ]; then
+        if [ "${KEY,,:0:8}" = "coinbase" ]; then
           while IFS=$'\t' read -r CRYPTO ACCTID TIMESTAMP; do
-            [[ "${KEY}" == "coinbase_pro" && "${CRYPTO}" != "USD" ]] && continue
+            [[ "${KEY,,}" == "coinbase_pro" && "${CRYPTO}" != "USD" ]] && continue
             [ -n "${ACCT}" ] && ACCT+=$'\n'
             ACCT+="$(sum_ledger "${KEY}" "${ACCTID}" "spending")"
           done <<< "$(parse_json "${KEY}" "acct_ids" "$(get_accounts "${KEY}" "${AKEY[${CRNT}]}" "${PKEY[${CRNT}]}" "${SKEY[${CRNT}]}")")"
