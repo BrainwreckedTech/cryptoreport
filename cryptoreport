@@ -821,7 +821,7 @@ case "${1}" in
               QSTR="startTime=${DATE_BGN}&endTime=${DATE_END}"
             fi
             RPLY="$(gather_response "${EXCHANGE}" "${AURI}" "${EPNT}" "${QSTR}")"
-            if [[ ${EXCHANGE} == kucoin* ]]; then
+            if [[ ${EXCHANGE,,} == kucoin* ]]; then
               RPLY="$(parse_json "${EXCHANGE}" "acct_ids" "${RPLY}")"
               if [ -n "${RPLY}" ]; then
                 while IFS=$'\t' read -r CRYPTO ACCTID TIMESTAMP; do
