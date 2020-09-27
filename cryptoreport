@@ -443,34 +443,34 @@ function parse_json {
             binance*) jq_array='.balances[]'           ; jq_select='select((.free|tonumber)>0)'                                 ; jq_return='[.asset,         .free,           (now|rint)                   ]';;
             coinbase) jq_array='.data[]'               ; jq_select='select((.balance.amount|tonumber)>0 and .created_at!=null)' ; jq_return='[.currency.code, .balance.amount, (.updated_at|fromdateiso8601)]';;
         coinbase_pro) jq_array='.[]'                   ; jq_select='select((.balance|tonumber)>0)'                              ; jq_return='[.currency,      .balance,        (now|rint)                   ]';;
-        kraken_stake) jq_array='.result | to_entries[]'; jq_select='select(.key | contains(".S"))'                              ; jq_return='[.key,           .value,          (now|rint)                   ]';;
-        kraken_trade) jq_array='.result | to_entries[]'; jq_select='select(.key | contains(".S") | not)'                        ; jq_return='[.key,           .value,          (now|rint)                   ]';;
-         kucoin_main) jq_array='.data[]'               ; jq_select='select((.balance|tonumber)>0 and .type=="main")'            ; jq_return='[.currency,      .balance,        (now|rint)                   ]';;
-         kucoin_pool) jq_array='.data[]'               ; jq_select='select((.balance|tonumber)>0 and .type=="pool")'            ; jq_return='[.currency,      .balance,        (now|rint)                   ]';;
-         kucoin_lock) jq_array='.data[]'               ; jq_select='select((.balance|tonumber)>0 and .type=="pool")'            ; jq_return='[.currency,      .balance,        (now|rint)                   ]';;
+        kraken:stake) jq_array='.result | to_entries[]'; jq_select='select(.key | contains(".S"))'                              ; jq_return='[.key,           .value,          (now|rint)                   ]';;
+        kraken:trade) jq_array='.result | to_entries[]'; jq_select='select(.key | contains(".S") | not)'                        ; jq_return='[.key,           .value,          (now|rint)                   ]';;
+         kucoin:main) jq_array='.data[]'               ; jq_select='select((.balance|tonumber)>0 and .type=="main")'            ; jq_return='[.currency,      .balance,        (now|rint)                   ]';;
+         kucoin:pool) jq_array='.data[]'               ; jq_select='select((.balance|tonumber)>0 and .type=="pool")'            ; jq_return='[.currency,      .balance,        (now|rint)                   ]';;
+         kucoin:lock) jq_array='.data[]'               ; jq_select='select((.balance|tonumber)>0 and .type=="pool")'            ; jq_return='[.currency,      .balance,        (now|rint)                   ]';;
       esac
       ;;
     acct_ids)
       case "${exchange,,}" in
             binance*) jq_array='.balances[]'; jq_select=''                         ; jq_return='[.asset,         .id, (now|rint)]';;
             coinbase) jq_array='.data[]'    ; jq_select='select(.created_at!=null)'; jq_return='[.currency.code, .id, (.updated_at|fromdateiso8601)]';;
-        coinbase_pro) jq_array='.[]'        ; jq_select=''                         ; jq_return='[.currency,      .id, (now|rint)]';;
-         kucoin_main) jq_array='.data[]'    ; jq_select='select(.type=="main")'    ; jq_return='[.currency,      .id, (now|rint)]';;
-         kucoin_pool) jq_array='.data[]'    ; jq_select='select(.type=="pool")'    ; jq_return='[.currency,      .id, (now|rint)]';;
-         kucoin_lock) jq_array='.data[]'    ; jq_select='select(.type=="pool")'    ; jq_return='[.currency,      .id, (now|rint)]';;
+        coinbase:pro) jq_array='.[]'        ; jq_select=''                         ; jq_return='[.currency,      .id, (now|rint)]';;
+         kucoin:main) jq_array='.data[]'    ; jq_select='select(.type=="main")'    ; jq_return='[.currency,      .id, (now|rint)]';;
+         kucoin:pool) jq_array='.data[]'    ; jq_select='select(.type=="pool")'    ; jq_return='[.currency,      .id, (now|rint)]';;
+         kucoin:lock) jq_array='.data[]'    ; jq_select='select(.type=="pool")'    ; jq_return='[.currency,      .id, (now|rint)]';;
       esac
       ;;
     acct_lgr|ledger)
       case "${exchange,,}" in
           binance*) jq_array='.rows[]'      ; jq_return='[.asset, .amount, ((.divTime / 1000)|rint)]';;
-       kucoin_lock) jq_array='.data.items[]'; jq_return='[.currency, (if .bizType=="Staking" then .amount else ("-"+.amount) end), ((.createdAt / 1000)|rint), .direction]' ; jq_select='select(.bizType=="Staking" or .bizType=="Redemption")';;
+       kucoin:lock) jq_array='.data.items[]'; jq_return='[.currency, (if .bizType=="Staking" then .amount else ("-"+.amount) end), ((.createdAt / 1000)|rint), .direction]' ; jq_select='select(.bizType=="Staking" or .bizType=="Redemption")';;
       esac
       ;;
     rewards)
       case "${exchange,,}" in
-        kucoin_lock) jq_array='.data.items[]'; jq_return='[.currency, (if .direction=="in" then .amount else ("-"+.amount) end), ((.createdAt / 1000)|rint)]'; jq_select='select(.bizType=="Staking Profits")';;
-        kucoin_main) jq_array='.data.items[]'; jq_return='[.currency, (if .direction=="in" then .amount else ("-"+.amount) end), ((.createdAt / 1000)|rint)]'; jq_select='select(.bizType=="Rewards")';;
-        kucoin_pool) jq_array='.data.items[]'; jq_return='[.currency, (if .direction=="in" then .amount else ("-"+.amount) end), ((.createdAt / 1000)|rint)]'; jq_select='select(.bizType=="Soft Staking Profits")';;
+        kucoin:lock) jq_array='.data.items[]'; jq_return='[.currency, (if .direction=="in" then .amount else ("-"+.amount) end), ((.createdAt / 1000)|rint)]'; jq_select='select(.bizType=="Staking Profits")';;
+        kucoin:main) jq_array='.data.items[]'; jq_return='[.currency, (if .direction=="in" then .amount else ("-"+.amount) end), ((.createdAt / 1000)|rint)]'; jq_select='select(.bizType=="Rewards")';;
+        kucoin:pool) jq_array='.data.items[]'; jq_return='[.currency, (if .direction=="in" then .amount else ("-"+.amount) end), ((.createdAt / 1000)|rint)]'; jq_select='select(.bizType=="Soft Staking Profits")';;
       esac
       ;;
     spending)
@@ -491,7 +491,7 @@ function parse_json {
 function get_config {
   ${DEBUGGER} && printf 'Called get_config %s...\n' "$(printf "'%s' " "${@}" | xargs)" >&2
 
-  local retvalue="$(jq -M "${1/_????*\./.}" <<< "${APICONFIG}" | tr -d '"')"
+  local retvalue="$(jq -M "${1/\:????*\./.}" <<< "${APICONFIG}" | tr -d '"')"
 
   printf '%s' "${retvalue}"
   ${DEBUGGER} && printf 'Called get_config returning %s\n' "${retvalue}" >&2
@@ -670,7 +670,7 @@ function row_format {
 # This is because we have to look for slightly different things based on what we want from KuCoin
 
 APICONFIG=$(<"${0}.json")
-WALLETS=( $( jq -M 'to_entries[]|.key' <<< "${APICONFIG}" | tr -d '"' | sed 's/\(KuCoin\)/\1_Main\n\1_Pool\n\1_Lock/gI' | sed 's/\(Kraken\)/\1_Trade\n\1_Stake/gI' ) )
+WALLETS=( $( jq -M 'to_entries[]|.key' <<< "${APICONFIG}" | tr -d '"' | sed 's/\(KuCoin\)/\1:Main\n\1:Pool\n\1:Lock/gI' | sed 's/\(Kraken\)/\1:Trade\n\1:Stake/gI' ) )
 
 CRNT=0
 
@@ -689,7 +689,7 @@ case "${1}" in
             TSV_DATA+="$(awk -F$'\t' '{OFS=FS; print "'${EXCHANGE}'", $1, $2, $3}' <<< "$(get_tsv_account "${EXCHANGE}")")"$'\n'
           else
             printf "\033[2K\rGetting account info from %s..." "${EXCHANGE}"
-            if [ "${EXCHANGE,,}" = "kucoin_lock" ]; then
+            if [ "${EXCHANGE,,}" = "kucoin:lock" ]; then
               while IFS=$'\t' read -r CURRENCY ACCT_NUM TIMESTAMP; do
                 printf "\033[2K\rGetting account info from %s...%s ledger..." "${EXCHANGE}" "${CURRENCY}"
                 NEWSTAKE="$(sum_ledger "${EXCHANGE}" "${ACCT_NUM}" "ledger")"

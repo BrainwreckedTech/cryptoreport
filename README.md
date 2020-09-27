@@ -150,19 +150,19 @@ But the last balance on KuCoin -- the coins you have locked up in Fixed Deposit 
 
 So there are four virtual exchanges when you set up KuCoin API access.
 
-**KuCoin_Main:**  Your main account balance  
-**KuCoin_Trade:**  Your trade account balance  
-**KuCoin_Pool:**  Your Pool-X account balance  
-**KuCoin_Lock:**  The balance you have locked up on Pool-X
+**KuCoin:Main:**  Your main account balance  
+**KuCoin:Trade:**  Your trade account balance  
+**KuCoin:Pool:**  Your Pool-X account balance  
+**KuCoin:Lock:**  The balance you have locked up on Pool-X
 
-***Warning:*** KuCoin_Trade is not set up yet.  As a result, any balance you have in your trading account will be ignored.  Until this is rectified, please keep your coins out of the trading account until needed for trade so they can be counted.
+***Warning:*** KuCoin:Trade is not set up yet.  As a result, any balance you have in your trading account will be ignored.  Until this is rectified, please keep your coins out of the trading account until needed for trade so they can be counted.
 
 ### Kraken
 
 Kraken separates staking and trading balances as noted on their main web site.  Both balances are returned by the API with staking balances denoted with a ".S" at the end of the ticker symbol.  (E.g., DOT is the balance in the trade account while DOT.S is the balance in the staking account.)
 
-**Kraken_Stake:** Your staking balance  
-**Karken_Trade:** Your trading balance
+**Kraken:Stake:** Your staking balance  
+**Karken:Trade:** Your trading balance
 
 ## Design Decisions
 
