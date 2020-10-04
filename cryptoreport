@@ -130,6 +130,8 @@ function fix_currency_names {
   local origtext="${1}"
 
   fixedtxt="${origtext//MCDAI/DAI}"     # Celsius
+  fixedtxt="${origtext//BCHSV/BSV}"     # KuCoin
+  fixedtxt="${fixedtxt//ATOM\.S/ATOM}"  # Kraken Staking.
   fixedtxt="${fixedtxt//DOT\.S/DOT}"    # Kraken Staking.
   fixedtxt="${fixedtxt//XXBT/BTC}"      # Kraken
   fixedtxt="${fixedtxt//XETH/ETH}"      # Kraken
